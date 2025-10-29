@@ -1,11 +1,13 @@
 // server/index.js
 import 'dotenv/config';
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 // ==== ENV ====
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';         // обязателен
-const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';     // лучше фиксировать
-const STATIC_ORIGIN = process.env.STATIC_ORIGIN || '*';         // домен твоего статика или '*'
+const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';     // дефолтный чат (опц.)
+const STATIC_ORIGIN = process.env.STATIC_ORIGIN || '*';         // домен твоего сайта или '*'
 
 // ==== App ====
 const app = express();
@@ -14,13 +16,26 @@ const app = express();
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// CORS (сузь до домена статики в проде)
+// CORS (в проде лучше сузить до твоего домена)
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', STATIC_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
+});
+
+// ==== Static ====
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// Раздача статики (app.js, css, картинки)
+app.use(express.static(PUBLIC_DIR));
+
+// Главная страница /
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
 // ==== Utils ====
@@ -60,7 +75,7 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
 }
 
 // ==== Routes ====
-app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({ ok: true }));
 
 /**
  * POST /api/report

