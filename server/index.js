@@ -1,8 +1,8 @@
 // server/index.js
 import 'dotenv/config';
 import express from 'express';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 
@@ -19,12 +19,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
+// Читаем index.html один раз при старте
+const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+
 // ==== App ====
 const app = express();
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// CORS (в проде ограничь до домена)
+// ==== CORS ====
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', STATIC_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
@@ -33,7 +36,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Раздача статики
+// ==== Раздача статики ====
 app.use(express.static(PUBLIC_DIR));
 app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
@@ -79,7 +82,6 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   if (!chatId) throw new Error('Missing chat_id');
   if (!photoBuf?.length) throw new Error('Empty photo buffer');
 
-  // В Node 18+ есть fetch/FormData/Blob (undici)
   const form = new FormData();
   form.append('chat_id', chatId);
   form.append('caption', caption);
@@ -99,7 +101,6 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 // ==== API: регистрация ссылки (бот вызывает) ====
-// POST /api/register-link  { slug, chatId, ownerId }
 app.post('/api/register-link', requireAdminSecret, (req, res) => {
   try {
     const { slug, chatId, ownerId } = req.body || {};
@@ -127,24 +128,27 @@ app.post('/api/register-link', requireAdminSecret, (req, res) => {
   }
 });
 
-// ==== Страница по ссылке /r/:slug (внедряем chatId в окно) ====
+// ==== Страница по ссылке /r/:slug ====
 app.get('/r/:slug', (req, res) => {
-  const { slug } = req.params;
-  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
-  if (!row || row.disabled) return res.status(404).send('Not found');
+  try {
+    const { slug } = req.params;
+    const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
+    if (!row || row.disabled) return res.status(404).send('Not found');
 
-  let html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
-  const inject = `<script>window.__TARGET_CHAT_ID=${JSON.stringify(row.chat_id)};window.__SLUG=${JSON.stringify(slug)};</script>`;
-  html = html.replace('</body>', `${inject}\n</body>`);
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(html);
+    const html = INDEX_HTML.replace(
+      '/*__CHAT_ID__*/',
+      `window.__reportChatId=${JSON.stringify(row.chat_id)};window.__SLUG=${JSON.stringify(slug)};`
+    );
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) {
+    console.error('[GET /r/:slug] error:', e);
+    res.status(500).send('Internal error');
+  }
 });
 
 // ==== Приём отчёта ====
-/**
- * POST /api/report
- * Body: { userAgent, platform, iosVersion, isSafari, geo, address, photoBase64, note, chatId? }
- */
 app.post('/api/report', async (req, res) => {
   try {
     const {

