@@ -71,46 +71,22 @@
     <div class="notice" id="note"></div>
   </div>
 
-  <!-- 🔧 Патч: прокидываем относительные /api/* на нужный API-оригин -->
+  <!-- ✅ Резолв /r/<slug> -> chatId. Если сервер уже инъектировал __TARGET_CHAT_ID — ничего не делаем -->
   <script>
-    // Укажи свой API-домен один раз здесь
-    window.__API_BASE = 'https://geo-photo-report.onrender.com';
-
-    // Мягкий перехват fetch: если зовут относительный /api/..., шлём на __API_BASE
-    (function patchFetch(){
-      const base = String(window.__API_BASE || '').replace(/\/+$/,'');
-      if (!base) return;
-      const orig = window.fetch.bind(window);
-      window.fetch = (input, init) => {
-        let url = typeof input === 'string' ? input : (input && input.url) || '';
-        if (url.startsWith('/api/')) {
-          url = base + url;
-          if (typeof input !== 'string') input = new Request(url, input);
-        }
-        return typeof input === 'string' ? orig(url, init) : orig(input, init);
-      };
-    })();
-  </script>
-
-  <!-- ✅ Резолв /r/<slug> -> chatId (должен идти ДО app.js) -->
-  <script>
-    // Если URL вида /r/<slug> — резолвим его в chatId
     (async function resolveSlug(){
+      if (window.__TARGET_CHAT_ID) return; // сервер /r/:slug уже подставил
       const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
       if (!m) return;
       const slug = m[1];
       window.__TARGET_SLUG = slug;
-
       try {
-        const r = await fetch(`${window.__API_BASE}/api/resolve-link?slug=${encodeURIComponent(slug)}`);
-        let data = null;
-        try { data = await r.json(); } catch(_) {}
+        const r = await fetch(`/api/resolve-link?slug=${encodeURIComponent(slug)}`);
+        let data = null; try { data = await r.json(); } catch(_) {}
         if (r.ok && data && data.ok && data.chatId) {
           window.__TARGET_CHAT_ID = String(data.chatId);
         } else {
           const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
           console.warn('resolve-link failed:', msg);
-          // можно вывести инфо в UI, если нужно:
           const note = document.getElementById('note');
           if (note) note.textContent = 'Ссылка не активна или не найдена.';
         }
@@ -123,7 +99,7 @@
   </script>
 
   <!-- Внешний скрипт с авто-потоком и защитой клика -->
-  <script src="app.js"></script>
+  <script src="/app.js"></script>
 
   <!-- Локальная логика страницы -->
   <script>
