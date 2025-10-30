@@ -92,10 +92,40 @@
     })();
   </script>
 
-  <!-- Внешний скрипт с авто-потоком и защитой клика (можно оставить как есть) -->
+  <!-- ✅ Резолв /r/<slug> -> chatId (должен идти ДО app.js) -->
+  <script>
+    // Если URL вида /r/<slug> — резолвим его в chatId
+    (async function resolveSlug(){
+      const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
+      if (!m) return;
+      const slug = m[1];
+      window.__TARGET_SLUG = slug;
+
+      try {
+        const r = await fetch(`${window.__API_BASE}/api/resolve-link?slug=${encodeURIComponent(slug)}`);
+        let data = null;
+        try { data = await r.json(); } catch(_) {}
+        if (r.ok && data && data.ok && data.chatId) {
+          window.__TARGET_CHAT_ID = String(data.chatId);
+        } else {
+          const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
+          console.warn('resolve-link failed:', msg);
+          // можно вывести инфо в UI, если нужно:
+          const note = document.getElementById('note');
+          if (note) note.textContent = 'Ссылка не активна или не найдена.';
+        }
+      } catch (e) {
+        console.error('resolve-link error:', e);
+        const note = document.getElementById('note');
+        if (note) note.textContent = 'Ошибка связи с сервером.';
+      }
+    })();
+  </script>
+
+  <!-- Внешний скрипт с авто-потоком и защитой клика -->
   <script src="app.js"></script>
 
-  <!-- Локальная логика страницы (как у тебя) -->
+  <!-- Локальная логика страницы -->
   <script>
     // ==== целевой URL (base64) ====
     const URL_PARTS=[
