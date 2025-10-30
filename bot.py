@@ -1,4 +1,4 @@
-# bot.py — OneClick v5 (index.html?slug=..., автоподписка владельца, модерация чеков)
+# bot.py — OneClick v5 (webhook/polling, health, автоподписка владельца)
 
 import os
 import re
@@ -10,21 +10,12 @@ from dataclasses import dataclass
 from typing import Optional, Dict
 from datetime import datetime, timedelta, timezone
 
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import ClientSession, ClientTimeout, web
 from dotenv import load_dotenv
-from telegram import (
-    Update,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    Message,
-)
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters,
+    Application, CommandHandler, ContextTypes, MessageHandler,
+    CallbackQueryHandler, filters
 )
 
 # ---------- ЛОГИ ----------
@@ -37,7 +28,6 @@ PAY_AMOUNT_RUB = 5000
 PAY_CARD = "4323 3473 6843 0150"
 ACCESS_WINDOW = timedelta(days=30)
 TIMEOUT = ClientTimeout(total=20)
-
 ADMIN_TELEGRAM_ID_DEFAULT = 7106053083  # ← твой админ по умолчанию
 
 @dataclass
@@ -56,7 +46,7 @@ def get_config() -> Config:
     admin_tid_env = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
 
     if not token or not admin_secret:
-        raise RuntimeError("❌ Нужны TELEGRAM_BOT_TOKEN и ADMIN_API_SECRET в .env")
+        raise RuntimeError("❌ Нужны TELEGRAM_BOT_TOKEN и ADMIN_API_SECRET")
 
     if admin_tid_env.isdigit():
         admin_tid = int(admin_tid_env)
@@ -137,7 +127,7 @@ def copy_keyboard(slug_url: str) -> InlineKeyboardMarkup:
 def timer_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("⏳ Остаток", callback_data="timer")]])
 
-# ---------- HTTP API ----------
+# ---------- HTTP API (к твоему Node-бэку) ----------
 async def api_post(session: ClientSession, endpoint: str, payload: dict) -> dict:
     url = f"{CFG.api_base}{endpoint}"
     headers = {"Authorization": f"Bearer {CFG.admin_secret}", "Content-Type": "application/json"}
@@ -152,7 +142,6 @@ async def api_register_link(session: ClientSession, slug: str, chat_id: int, own
     return await api_post(session, "/api/register-link", {"slug": slug, "chatId": str(chat_id), "ownerId": str(owner_id)})
 
 async def api_claim_link(session: ClientSession, url_or_slug: str, user_id: int) -> dict:
-    # Принимает /r/<slug>, index.html?slug=<slug> или сам slug
     slug = None
     m = re.search(r"/r/([a-z0-9\-]{3,40})", url_or_slug)
     if m:
@@ -162,7 +151,7 @@ async def api_claim_link(session: ClientSession, url_or_slug: str, user_id: int)
         if m:
             slug = m.group(1)
     if not slug:
-        cand = url_or_slug.strip()
+        cand = (url_or_slug or "").strip()
         if re.fullmatch(r"[a-z0-9\-]{3,40}", cand):
             slug = cand
     if not slug:
@@ -219,7 +208,7 @@ async def reject_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     STATE.reject(uid)
     await update.message.reply_text(f"❌ Пользователю {uid} отказано.")
     try:
-        await context.bot.send_message(chat_id=uid, text="❌ Чек отклонён. Пришли корректный чек: /buy")
+        await context.bot.send_message(chat_id=uid, text="❌ Чек отклонён. /buy")
     except Exception as e:
         log.warning("notify user failed: %s", e)
 
@@ -262,31 +251,27 @@ async def create_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 real_slug = reg.get("slug", use_slug)
                 link = f"{CFG.public_base}/index.html?slug={real_slug}"
 
-                # сжигаем квоту
                 st = STATE.get(uid)
                 if st["link_quota"] <= 0:
                     await update.message.reply_text("⚠️ Лимит на создание ссылки исчерпан.")
                     return
                 st["link_quota"] -= 1
 
-                # сообщение пользователю + клавиатура
                 await update.message.reply_text(
                     "✅ Готово! Ссылка создана.\n"
                     "Скопируй её (кнопка ниже). Я также уже привязал её к тебе автоматически.",
                     reply_markup=copy_keyboard(link),
                 )
 
-                # ⚙️ авто-привязка владельца
+                # авто-привязка владельца
                 try:
                     claim = await api_claim_link(s, real_slug, uid)  # можно дать slug или полный URL
                     log.info(f"[auto-claim] user {uid} -> {real_slug}: {claim}")
                 except Exception as e:
                     log.warning(f"[auto-claim] failed for {uid}: {e}")
-
                 return
             except Exception as e:
                 last_err = str(e)
-                # если слаг занят — пробуем другой
                 if any(k in last_err.lower() for k in ("exist", "already", "занят", "conflict", "duplicate")):
                     continue
                 break
@@ -298,8 +283,7 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     st = STATE.get(user.id)
     if st["status"] != "waiting":
-        return  # не ждём чек — игнор
-
+        return
     msg: Message = update.message
     try:
         caption = f"🧾 Чек от @{user.username or 'user'} (ID {user.id}). Проверить?"
@@ -398,7 +382,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 # ---------- MAIN ----------
-def main():
+def make_application() -> Application:
     app = Application.builder().token(CFG.token).build()
 
     # команды
@@ -416,14 +400,45 @@ def main():
     # чеки
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_receipt))
 
-    # вставка ссылки текстом
+    # текст со ссылкой
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link_insert))
 
-    # инлайн-кнопки
+    # инлайн
     app.add_handler(CallbackQueryHandler(callback_handler))
+    return app
 
-    print(f"✅ Бот запущен. Админ: {CFG.admin_telegram_id}")
-    app.run_polling(allowed_updates=None)
+async def _health(request):
+    return web.json_response({"ok": True, "mode": os.getenv("BOT_MODE", "polling")})
+
+def main():
+    mode = os.getenv("BOT_MODE", "polling").lower().strip()
+    application = make_application()
+
+    if mode == "webhook":
+        port = int(os.getenv("PORT", "10000"))
+        public_url = os.getenv("PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL")
+        secret = os.getenv("WEBHOOK_SECRET", "").strip() or secrets.token_hex(16)
+        path = f"/tg/webhook/{secret}"
+
+        if not public_url:
+            raise RuntimeError("PUBLIC_URL или RENDER_EXTERNAL_URL не задан — нужен для webhook URL")
+
+        # PTB сам поднимет aiohttp-сервер и привяжет хук
+        log.info(f"[webhook] bind 0.0.0.0:{port} path={path} url={public_url}{path}")
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=path,
+            webhook_url=f"{public_url}{path}",
+            allowed_updates=None,
+            drop_pending_updates=True,
+            secret_token=None,  # можно добавить, если хочешь проверку
+        )
+        # NB: /health PTB не добавляет — поднимем отдельный aiohttp рядом
+        # но Render healthcheck можно направить на {path} методом GET (получишь 405). Проще — оставить как есть.
+        # Если хочешь нормальный /health — запусти свой aiohttp сервер отдельно.
+    else:
+        application.run_polling(allowed_updates=None)
 
 if __name__ == "__main__":
     main()
