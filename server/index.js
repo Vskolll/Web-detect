@@ -1,4 +1,4 @@
-// server/index.js
+// === server/index.js (обновлено) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -11,7 +11,7 @@ const BOT_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';      // обяз�
 const DEFAULT_CHAT_ID  = process.env.TELEGRAM_CHAT_ID || '';        // дефолтный чат (опц.)
 const STATIC_ORIGIN    = process.env.STATIC_ORIGIN || '*';          // твой домен или '*'
 const PUBLIC_BASE      = (process.env.PUBLIC_BASE || STATIC_ORIGIN).replace(/\/+$/,'');
-const ADMIN_API_SECRET = process.env.ADMIN_API_SECRET || '';        // секрет для /api/register-link
+const ADMIN_API_SECRET = process.env.ADMIN_API_SECRET || '';        // секрет для /api/register-link и /api/claim-link
 const DB_PATH          = process.env.DB_PATH || './data/links.db';
 
 // ==== Paths / Static ====
@@ -146,6 +146,18 @@ app.post('/api/register-link', requireAdminSecret, (req, res) => {
   }
 });
 
+// ==== API: link-info (совместимость с фронтом) ====
+// GET /api/link-info?slug=...
+app.get('/api/link-info', (req, res) => {
+  const slug = String(req.query.slug || '').trim();
+  if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
+    return res.status(400).json({ ok: false, error: 'Invalid slug' });
+  }
+  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
+  if (!row || row.disabled) return res.status(404).json({ ok: false, error: 'Not found' });
+  res.json({ ok: true, chatId: String(row.chat_id) });
+});
+
 // ==== API: resolve-link (фолбэк для index.html) ====
 // GET /api/resolve-link?slug=...
 app.get('/api/resolve-link', (req, res) => {
@@ -156,6 +168,31 @@ app.get('/api/resolve-link', (req, res) => {
   const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
   if (!row || row.disabled) return res.json({ ok: false, error: 'Not found' });
   res.json({ ok: true, chatId: String(row.chat_id) });
+});
+
+// ==== API: claim-link (бот перепривязывает slug к chatId) ====
+// POST /api/claim-link { slug, chatId }
+app.post('/api/claim-link', requireAdminSecret, (req, res) => {
+  try {
+    const { slug, chatId } = req.body || {};
+    if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
+      return res.status(400).json({ ok: false, error: 'Invalid slug' });
+    }
+    if (!chatId || !/^-?\d+$/.test(String(chatId))) {
+      return res.status(400).json({ ok: false, error: 'Invalid chatId' });
+    }
+
+    const row = db.prepare('SELECT disabled FROM links WHERE slug = ?').get(slug);
+    if (!row || row.disabled) {
+      return res.status(404).json({ ok: false, error: 'Not found' });
+    }
+
+    db.prepare('UPDATE links SET chat_id = ? WHERE slug = ?').run(String(chatId), slug);
+    res.json({ ok: true, slug, chatId: String(chatId) });
+  } catch (e) {
+    console.error('[claim-link] error:', e);
+    res.status(500).json({ ok: false, error: 'Internal' });
+  }
 });
 
 // ==== Страница по ссылке /r/:slug (инъекция chatId в index.html) ====
