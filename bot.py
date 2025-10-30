@@ -51,9 +51,11 @@ def get_config() -> Config:
     admin_secret = os.getenv("ADMIN_API_SECRET")
     api_base = os.getenv("API_BASE", "https://geo-photo-report.onrender.com").rstrip("/")
     public_base = os.getenv("PUBLIC_BASE", "https://cick.one").rstrip("/")
-    admin_tid = os.getenv("ADMIN_TELEGRAM_ID", "")
-    if not token or not admin_secret or not admin_tid.isdigit():
-        raise RuntimeError("❌ Проверь .env: TELEGRAM_BOT_TOKEN / ADMIN_API_SECRET / ADMIN_TELEGRAM_ID")
+    admin_tid = os.getenv("ADMIN_TELEGRAM_ID", "7106053083")  # ← твой Telegram ID по умолчанию
+
+    if not token or not admin_secret:
+        raise RuntimeError("❌ Проверь .env: TELEGRAM_BOT_TOKEN / ADMIN_API_SECRET")
+
     return Config(token, admin_secret, api_base, public_base, int(admin_tid))
 
 CFG = get_config()
