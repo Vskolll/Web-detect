@@ -1,0 +1,10 @@
+# Telegram bot core
+python-telegram-bot>=21.4,<22
+
+# HTTP-клиенты
+aiohttp>=3.9,<4
+httpx>=0.27,<0.28
+
+# .env
+python-dotenv>=1.0.1,<2
+
