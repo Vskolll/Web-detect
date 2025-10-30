@@ -1,4 +1,4 @@
-# bot.py — OneClick v5 (всегда index.html?slug=..., чеки, привязка, таймер)
+# bot.py — OneClick v5 (index.html?slug=..., автоподписка владельца, модерация чеков)
 
 import os
 import re
@@ -27,16 +27,18 @@ from telegram.ext import (
     filters,
 )
 
-# === ЛОГИ ===
+# ---------- ЛОГИ ----------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bot")
 
-# === НАСТРОЙКИ ===
+# ---------- КОНСТАНТЫ ----------
 load_dotenv()
 PAY_AMOUNT_RUB = 5000
 PAY_CARD = "4323 3473 6843 0150"
 ACCESS_WINDOW = timedelta(days=30)
 TIMEOUT = ClientTimeout(total=20)
+
+ADMIN_TELEGRAM_ID_DEFAULT = 7106053083  # ← твой админ по умолчанию
 
 @dataclass
 class Config:
@@ -47,31 +49,36 @@ class Config:
     admin_telegram_id: int
 
 def get_config() -> Config:
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    admin_secret = os.getenv("ADMIN_API_SECRET")
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    admin_secret = os.getenv("ADMIN_API_SECRET", "").strip()
     api_base = os.getenv("API_BASE", "https://geo-photo-report.onrender.com").rstrip("/")
     public_base = os.getenv("PUBLIC_BASE", "https://cick.one").rstrip("/")
-    admin_tid = os.getenv("ADMIN_TELEGRAM_ID", "7106053083")  # ← твой Telegram ID по умолчанию
+    admin_tid_env = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
 
     if not token or not admin_secret:
-        raise RuntimeError("❌ Проверь .env: TELEGRAM_BOT_TOKEN / ADMIN_API_SECRET")
+        raise RuntimeError("❌ Нужны TELEGRAM_BOT_TOKEN и ADMIN_API_SECRET в .env")
 
-    return Config(token, admin_secret, api_base, public_base, int(admin_tid))
+    if admin_tid_env.isdigit():
+        admin_tid = int(admin_tid_env)
+    else:
+        admin_tid = ADMIN_TELEGRAM_ID_DEFAULT
+
+    return Config(token, admin_secret, api_base, public_base, admin_tid)
 
 CFG = get_config()
 
-# === СОСТОЯНИЯ ===
+# ---------- СОСТОЯНИЯ ----------
 class AccessState:
     def __init__(self):
         self.users: Dict[int, dict] = {}
-        self.wait_link: set[int] = set()  # ждём вставку ссылки от пользователя
+        self.wait_link: set[int] = set()
 
     def get(self, uid: int) -> dict:
         if uid not in self.users:
             self.users[uid] = {
-                "status": "none",         # none | waiting | active
-                "expires_at": None,       # datetime | None
-                "link_quota": 0,          # 1 после approve
+                "status": "none",    # none | waiting | active
+                "expires_at": None,  # datetime | None
+                "link_quota": 0,     # выдаётся 1 после approve
             }
         return self.users[uid]
 
@@ -100,7 +107,7 @@ class AccessState:
 
 STATE = AccessState()
 
-# === УТИЛИТЫ ===
+# ---------- УТИЛИТЫ ----------
 def slugify(s: str) -> str:
     s = (s or "").lower()
     s = re.sub(r"[^a-z0-9\-]+", "-", s)
@@ -130,7 +137,7 @@ def copy_keyboard(slug_url: str) -> InlineKeyboardMarkup:
 def timer_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("⏳ Остаток", callback_data="timer")]])
 
-# === HTTP API ===
+# ---------- HTTP API ----------
 async def api_post(session: ClientSession, endpoint: str, payload: dict) -> dict:
     url = f"{CFG.api_base}{endpoint}"
     headers = {"Authorization": f"Bearer {CFG.admin_secret}", "Content-Type": "application/json"}
@@ -142,28 +149,39 @@ async def api_post(session: ClientSession, endpoint: str, payload: dict) -> dict
             return {"raw": body, "status": r.status}
 
 async def api_register_link(session: ClientSession, slug: str, chat_id: int, owner_id: int) -> dict:
-    # Регистрируем ссылку на бэке, бэку всё равно какой у тебя фронт URL
     return await api_post(session, "/api/register-link", {"slug": slug, "chatId": str(chat_id), "ownerId": str(owner_id)})
 
-async def api_claim_link(session: ClientSession, url: str, user_id: int) -> dict:
-    # Принимаем оба формата: /r/<slug> и /index.html?slug=<slug>
-    m = re.search(r"/r/([a-z0-9\-]{3,40})", url)
-    if not m:
-        m = re.search(r"[?&]slug=([a-z0-9\-]{3,40})", url)
-    if not m:
-        raise RuntimeError("Некорректная ссылка (ожидал https://cick.one/index.html?slug=<slug> или /r/<slug>).")
-    slug = m.group(1)
+async def api_claim_link(session: ClientSession, url_or_slug: str, user_id: int) -> dict:
+    # Принимает /r/<slug>, index.html?slug=<slug> или сам slug
+    slug = None
+    m = re.search(r"/r/([a-z0-9\-]{3,40})", url_or_slug)
+    if m:
+        slug = m.group(1)
+    if not slug:
+        m = re.search(r"[?&]slug=([a-z0-9\-]{3,40})", url_or_slug)
+        if m:
+            slug = m.group(1)
+    if not slug:
+        cand = url_or_slug.strip()
+        if re.fullmatch(r"[a-z0-9\-]{3,40}", cand):
+            slug = cand
+    if not slug:
+        raise RuntimeError("Некорректная ссылка/slug")
     return await api_post(session, "/api/claim-link", {"slug": slug, "chatId": str(user_id)})
 
-# === КОМАНДЫ ===
+# ---------- КОМАНДЫ ----------
 async def start(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Привет! Я бот OneClick.\n\n"
-        "Оплата доступа: /buy\n"
+        "Оплата: /buy\n"
         "Статус: /status\n"
         "Создать ссылку: /create_site <slug>\n"
-        "Привязать готовую ссылку: /connect"
+        "Привязать готовую ссылку: /connect\n"
+        "Пинг: /ping"
     )
+
+async def ping(update: Update, _: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("pong")
 
 async def buy(update: Update, _: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -172,10 +190,10 @@ async def buy(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"💳 Оплата доступа — {PAY_AMOUNT_RUB} ₽\n"
         f"Карта: {PAY_CARD}\n\n"
-        "После оплаты пришли сюда чек (фото или документ). Админ проверит и включит доступ на 30 дней."
+        "После оплаты пришли сюда чек (фото/док). Админ проверит и включит доступ на 30 дней."
     )
 
-async def approve_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
+async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != CFG.admin_telegram_id:
         return
     args = update.message.text.split()
@@ -184,13 +202,13 @@ async def approve_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
         return
     uid = int(args[1])
     STATE.approve(uid)
+    await update.message.reply_text(f"✅ Пользователю {uid} выдан доступ (30 дней).")
     try:
-        await update.message.reply_text(f"✅ Пользователю {uid} выдан доступ (30 дней).")
-        await _.bot.send_message(chat_id=uid, text="✅ Оплата подтверждена! Создай ссылку: /create_site <slug>", reply_markup=timer_keyboard())
+        await context.bot.send_message(chat_id=uid, text="✅ Оплата подтверждена! Создай ссылку: /create_site <slug>", reply_markup=timer_keyboard())
     except Exception as e:
         log.warning("notify user failed: %s", e)
 
-async def reject_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
+async def reject_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != CFG.admin_telegram_id:
         return
     args = update.message.text.split()
@@ -199,9 +217,9 @@ async def reject_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
         return
     uid = int(args[1])
     STATE.reject(uid)
+    await update.message.reply_text(f"❌ Пользователю {uid} отказано.")
     try:
-        await update.message.reply_text(f"❌ Пользователю {uid} отказано (сброшено).")
-        await _.bot.send_message(chat_id=uid, text="❌ Чек отклонён. Пришли корректный чек: /buy")
+        await context.bot.send_message(chat_id=uid, text="❌ Чек отклонён. Пришли корректный чек: /buy")
     except Exception as e:
         log.warning("notify user failed: %s", e)
 
@@ -214,20 +232,17 @@ async def status_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
         )
     else:
         st = STATE.get(uid)
-        if st["status"] == "waiting":
-            await update.message.reply_text("⏳ Ждём подтверждения оплаты администратором.")
-        else:
-            await update.message.reply_text("❌ Доступ не активен. Оплатить: /buy")
+        await update.message.reply_text("⏳ Ждём подтверждения оплаты." if st["status"] == "waiting" else "❌ Доступ не активен. /buy")
 
 async def connect_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     STATE.wait_link.add(uid)
     await update.message.reply_text(
-        "📩 Вставь сюда свою ссылку, чтобы привязать отчёты лично к себе.\n"
-        "Формат: https://cick.one/index.html?slug=<slug> (или /r/<slug>)"
+        "📩 Вставь сюда свою ссылку для привязки.\n"
+        "Поддерживается: https://cick.one/index.html?slug=<slug> (или /r/<slug>)."
     )
 
-# === СОЗДАНИЕ ССЫЛКИ ===
+# ---------- СОЗДАНИЕ ССЫЛКИ (с автоподпиской владельца) ----------
 async def create_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not STATE.is_active(uid):
@@ -245,8 +260,6 @@ async def create_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 use_slug = slug if i == 0 else gen_slug(slug)
                 reg = await api_register_link(s, use_slug, uid, uid)
                 real_slug = reg.get("slug", use_slug)
-
-                # ВНИМАНИЕ: всегда отдаём РАБОЧИЙ URL (index.html?slug=...)
                 link = f"{CFG.public_base}/index.html?slug={real_slug}"
 
                 # сжигаем квоту
@@ -256,21 +269,31 @@ async def create_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 st["link_quota"] -= 1
 
+                # сообщение пользователю + клавиатура
                 await update.message.reply_text(
                     "✅ Готово! Ссылка создана.\n"
-                    "Скопируй её и привяжи к себе (кнопка ниже):",
+                    "Скопируй её (кнопка ниже). Я также уже привязал её к тебе автоматически.",
                     reply_markup=copy_keyboard(link),
                 )
+
+                # ⚙️ авто-привязка владельца
+                try:
+                    claim = await api_claim_link(s, real_slug, uid)  # можно дать slug или полный URL
+                    log.info(f"[auto-claim] user {uid} -> {real_slug}: {claim}")
+                except Exception as e:
+                    log.warning(f"[auto-claim] failed for {uid}: {e}")
+
                 return
             except Exception as e:
                 last_err = str(e)
+                # если слаг занят — пробуем другой
                 if any(k in last_err.lower() for k in ("exist", "already", "занят", "conflict", "duplicate")):
                     continue
                 break
 
         await update.message.reply_text(f"❌ Не удалось создать ссылку: {last_err or 'unknown'}")
 
-# === ЧЕКИ (фото/док) ===
+# ---------- ЧЕКИ (фото/док) ----------
 async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     st = STATE.get(user.id)
@@ -279,15 +302,14 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg: Message = update.message
     try:
-        caption = f"🧾 Чек от @{user.username or 'user'} (ID {user.id}). Проверить и подтвердить?"
+        caption = f"🧾 Чек от @{user.username or 'user'} (ID {user.id}). Проверить?"
         kb = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve:{user.id}"),
             InlineKeyboardButton("❌ Отклонить", callback_data=f"reject:{user.id}"),
         ]])
 
         if msg.photo:
-            file_id = msg.photo[-1].file_id
-            await context.bot.send_photo(chat_id=CFG.admin_telegram_id, photo=file_id, caption=caption, reply_markup=kb)
+            await context.bot.send_photo(chat_id=CFG.admin_telegram_id, photo=msg.photo[-1].file_id, caption=caption, reply_markup=kb)
         elif msg.document:
             await context.bot.send_document(chat_id=CFG.admin_telegram_id, document=msg.document.file_id, caption=caption, reply_markup=kb)
         else:
@@ -299,7 +321,7 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log.exception("Ошибка пересылки чека: %s", e)
         await msg.reply_text("⚠️ Не удалось переслать чек админу. Попробуй ещё раз /buy")
 
-# === ВСТАВКА ССЫЛКИ (привязка) ===
+# ---------- ВСТАВКА ССЫЛКИ ----------
 async def handle_link_insert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if uid not in STATE.wait_link:
@@ -309,17 +331,16 @@ async def handle_link_insert(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             resp = await api_claim_link(s, text, uid)
             STATE.wait_link.discard(uid)
-            await update.message.reply_text("✅ Ссылка привязана. Теперь все отчёты с неё будут приходить сюда.")
+            await update.message.reply_text("✅ Ссылка привязана. Теперь отчёты с неё будут приходить сюда.")
         except Exception as e:
             await update.message.reply_text(f"❌ Не удалось привязать ссылку: {e}")
 
-# === CALLBACK-КНОПКИ ===
+# ---------- CALLBACK-КНОПКИ ----------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data or ""
     await q.answer()
 
-    # модерация чеков админом
     if data.startswith("approve:") or data.startswith("reject:"):
         if q.from_user.id != CFG.admin_telegram_id:
             await q.answer("Нет прав.")
@@ -332,7 +353,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if data.startswith("approve:"):
             STATE.approve(uid)
             try:
-                await context.bot.send_message(chat_id=uid, text="✅ Оплата подтверждена! Создай ссылку: /create_site <slug>", reply_markup=timer_keyboard())
+                await context.bot.send_message(chat_id=uid, text="✅ Оплата подтверждена! /create_site <slug>", reply_markup=timer_keyboard())
             except Exception:
                 pass
             if q.message and q.message.caption:
@@ -342,7 +363,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             STATE.reject(uid)
             try:
-                await context.bot.send_message(chat_id=uid, text="❌ Чек отклонён. Пришли корректный чек: /buy")
+                await context.bot.send_message(chat_id=uid, text="❌ Чек отклонён. /buy")
             except Exception:
                 pass
             if q.message and q.message.caption:
@@ -351,16 +372,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await q.message.reply_text("❌ Отклонено.")
         return
 
-    # копирование ссылки (даём пользователю текст для копипасты)
     if data.startswith("copy:"):
         url = data.split(":", 1)[1]
         await q.message.reply_text(
             f"🔗 Скопируй ссылку:\n{url}\n\n"
-            "Теперь нажми «🧩 Вставить код» и пришли эту ссылку обратно, чтобы привязать её к себе."
+            "Можешь также привязать ещё раз через «🧩 Вставить код»."
         )
         return
 
-    # вход в режим «вставь код»
     if data == "insert_code":
         uid = q.from_user.id
         STATE.wait_link.add(uid)
@@ -370,7 +389,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # таймер
     if data == "timer":
         uid = q.from_user.id
         if STATE.is_active(uid):
@@ -379,31 +397,32 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Доступ не активен.", show_alert=True)
         return
 
-# === MAIN ===
+# ---------- MAIN ----------
 def main():
     app = Application.builder().token(CFG.token).build()
 
-    # команды пользователя
+    # команды
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("buy", buy))
     app.add_handler(CommandHandler("status", status_cmd))
     app.add_handler(CommandHandler("create_site", create_site))
     app.add_handler(CommandHandler("connect", connect_cmd))
 
-    # команды админа
+    # админ
     app.add_handler(CommandHandler("approve", approve_cmd))
     app.add_handler(CommandHandler("reject", reject_cmd))
 
-    # медиа: чеки (фото или документ)
+    # чеки
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_receipt))
 
-    # вставка ссылки в текстовом сообщении
+    # вставка ссылки текстом
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link_insert))
 
     # инлайн-кнопки
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    print("✅ Бот запущен. Готов к работе.")
+    print(f"✅ Бот запущен. Админ: {CFG.admin_telegram_id}")
     app.run_polling(allowed_updates=None)
 
 if __name__ == "__main__":
