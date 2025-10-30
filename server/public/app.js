@@ -1,6 +1,6 @@
 // === app.js (версии от меня) ===
 // Работает по тому же origin, где открыт сайт
-const API_BASE = ''; // пустой => текущий origin
+const API_BASE = location.hostname.endsWith('cick.one') ? '' : 'https://cick.one';// пустой => текущий origin
 
 const UI = {
   text: document.getElementById('text'),
