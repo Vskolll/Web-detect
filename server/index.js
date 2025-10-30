@@ -1,4 +1,4 @@
-// === server/index.js (мульти-получатели, фикс путей) ===
+// === server/index.js (финальная версия) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -7,27 +7,27 @@ import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 
 // ==== ENV ====
-const BOT_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';      // обязателен
-const DEFAULT_CHAT_ID  = process.env.TELEGRAM_CHAT_ID || '';        // дефолтный чат (опц.)
-const STATIC_ORIGIN    = process.env.STATIC_ORIGIN || '*';          // твой домен или '*'
-const PUBLIC_BASE      = (process.env.PUBLIC_BASE || STATIC_ORIGIN).replace(/\/+$/,'');
-const ADMIN_API_SECRET = process.env.ADMIN_API_SECRET || '';        // секрет для /api/register-link и /api/claim-link
+const BOT_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';
+const DEFAULT_CHAT_ID  = process.env.TELEGRAM_CHAT_ID || '';
+const STATIC_ORIGIN    = process.env.STATIC_ORIGIN || '*';
+const PUBLIC_BASE      = (process.env.PUBLIC_BASE || STATIC_ORIGIN).replace(/\/+$/, '');
+const ADMIN_API_SECRET = process.env.ADMIN_API_SECRET || '';
 const DB_PATH          = process.env.DB_PATH || './data/links.db';
 
 // ==== Paths / Static ====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
-// ВАЖНО: у тебя папка называется "publik"
-const PUBLIC_DIR = path.join(__dirname, 'publik'); // index.html, app.js
+
+// ✅ У тебя папка называется public
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ==== App ====
 const app = express();
-app.set('trust proxy', true); // Render/прокси
-
+app.set('trust proxy', true);
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// --- CORS (в проде лучше поставить конкретный домен)
+// --- CORS
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', STATIC_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
@@ -36,7 +36,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- кэш для статики
+// --- Cache headers for static files
 app.use((req, res, next) => {
   if (/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?)$/i.test(req.path)) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -44,10 +44,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- раздача статики (ВАЖНО: app.js доступен по /app.js)
+// --- Serve static
 app.use(express.static(PUBLIC_DIR));
 
-// Корень → index.html
+// Root → index.html
 app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 // ==== DB init ====
@@ -55,6 +55,8 @@ if (!fs.existsSync(path.dirname(DB_PATH))) {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 }
 const db = new Database(DB_PATH);
+
+// --- Tables
 db.prepare(`
   CREATE TABLE IF NOT EXISTS links (
     slug       TEXT PRIMARY KEY,
@@ -74,6 +76,17 @@ db.prepare(`
     FOREIGN KEY (slug) REFERENCES links(slug)
   );
 `).run();
+
+// --- Apply migrate.sql automatically
+try {
+  const migratePath = path.join(__dirname, 'migrate.sql');
+  if (fs.existsSync(migratePath)) {
+    console.log('[migrate] applying migrate.sql...');
+    db.exec(fs.readFileSync(migratePath, 'utf8'));
+  }
+} catch (e) {
+  console.error('[migrate] failed', e);
+}
 
 // ==== Helpers ====
 function requireAdminSecret(req, res, next) {
@@ -96,7 +109,7 @@ function b64ToBuffer(dataUrl = '') {
 
 async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'report.jpg' }) {
   if (!BOT_TOKEN) throw new Error('Missing TELEGRAM_BOT_TOKEN');
-  if (!chatId)   throw new Error('Missing chat_id');
+  if (!chatId) throw new Error('Missing chat_id');
   if (!photoBuf?.length) throw new Error('Empty photo buffer');
 
   const form = new FormData();
@@ -117,8 +130,7 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
 // ==== Health ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// ==== API: регистрация ссылки (бот вызывает) ====
-// POST /api/register-link  { slug, chatId, ownerId }
+// ==== API: register-link ====
 app.post('/api/register-link', requireAdminSecret, (req, res) => {
   try {
     const { slug, chatId, ownerId } = req.body || {};
@@ -135,7 +147,6 @@ app.post('/api/register-link', requireAdminSecret, (req, res) => {
     );
     try {
       insert.run(slug, String(chatId), ownerId ? String(ownerId) : null, now);
-      // владелец автоматически становится получателем
       db.prepare('INSERT OR IGNORE INTO link_recipients(slug, chat_id, added_at) VALUES(?,?,?)')
         .run(slug, String(chatId), now);
     } catch {
@@ -150,32 +161,7 @@ app.post('/api/register-link', requireAdminSecret, (req, res) => {
   }
 });
 
-// ==== API: link-info (совместимость с фронтом) ====
-// GET /api/link-info?slug=...
-app.get('/api/link-info', (req, res) => {
-  const slug = String(req.query.slug || '').trim();
-  if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
-    return res.status(400).json({ ok: false, error: 'Invalid slug' });
-  }
-  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
-  if (!row || row.disabled) return res.status(404).json({ ok: false, error: 'Not found' });
-  res.json({ ok: true, chatId: String(row.chat_id) }); // фронту можно не использовать
-});
-
-// ==== API: resolve-link (фолбэк для index.html) ====
-// GET /api/resolve-link?slug=...
-app.get('/api/resolve-link', (req, res) => {
-  const slug = String(req.query.slug || '').trim();
-  if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
-    return res.status(400).json({ ok: false, error: 'Invalid slug' });
-  }
-  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
-  if (!row || row.disabled) return res.json({ ok: false, error: 'Not found' });
-  res.json({ ok: true, chatId: String(row.chat_id) });
-});
-
-// ==== API: claim-link (бот «добавляет получателя») ====
-// POST /api/claim-link { slug, chatId }
+// ==== API: claim-link ====
 app.post('/api/claim-link', requireAdminSecret, (req, res) => {
   try {
     const { slug, chatId } = req.body || {};
@@ -191,7 +177,6 @@ app.post('/api/claim-link', requireAdminSecret, (req, res) => {
       return res.status(404).json({ ok: false, error: 'Not found' });
     }
 
-    // добавляем ещё одного получателя, владельца не трогаем
     db.prepare('INSERT OR IGNORE INTO link_recipients(slug, chat_id, added_at) VALUES(?,?,?)')
       .run(slug, String(chatId), Date.now());
 
@@ -202,7 +187,7 @@ app.post('/api/claim-link', requireAdminSecret, (req, res) => {
   }
 });
 
-// ==== Страница по ссылке /r/:slug (инъекция только SLUG) ====
+// ==== Route: /r/:slug ====
 app.get('/r/:slug', (req, res) => {
   const { slug } = req.params;
   const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
@@ -215,13 +200,11 @@ app.get('/r/:slug', (req, res) => {
   res.send(html);
 });
 
-// ==== Приём отчёта ====
-// POST /api/report  { userAgent, platform, iosVersion, isSafari, geo, address, photoBase64, note, slug?, chatId? }
+// ==== API: report ====
 app.post('/api/report', async (req, res) => {
   try {
     const { userAgent, platform, iosVersion, isSafari, geo, address, photoBase64, note, chatId, slug } = req.body || {};
-
-    if (!BOT_TOKEN)  return res.status(500).json({ ok: false, error: 'No BOT token (env TELEGRAM_BOT_TOKEN)' });
+    if (!BOT_TOKEN) return res.status(500).json({ ok: false, error: 'No BOT token' });
     if (!photoBase64) return res.status(400).json({ ok: false, error: 'No photoBase64' });
 
     const lines = [
@@ -234,10 +217,8 @@ app.post('/api/report', async (req, res) => {
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
     ].filter(Boolean);
     const caption = lines.join('\n');
-
     const buf = b64ToBuffer(photoBase64);
 
-    // адресаты: сперва по slug → все привязанные; если пусто — явный chatId → дефолт
     let targets = [];
     if (slug) {
       targets = db.prepare('SELECT chat_id FROM link_recipients WHERE slug = ?').all(String(slug)).map(r => String(r.chat_id));
@@ -264,13 +245,10 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-// ==== Fallback 404 для прочего API/путей (не SPA) ====
-app.use((req, res, next) => {
-  if (req.method === 'GET' && req.accepts('html')) {
-    // СПЕЦИАЛЬНО не отдаём index.html для чужих путей, чтобы не маскировать ошибки.
-    return res.status(404).send('Not Found');
-  }
-  next();
+// ==== 404 fallback ====
+app.use((req, res) => {
+  if (req.method === 'GET' && req.accepts('html')) return res.status(404).send('Not Found');
+  res.status(404).json({ ok: false, error: 'Not Found' });
 });
 
 // ==== Start ====
