@@ -1,11 +1,10 @@
-# bot.py — простая воронка оплаты с чеками и автопривязкой кода
-# python-telegram-bot v20+, aiohttp, python-dotenv
+# bot.py — простая воронка оплаты с ручным подтверждением и 30-дневным доступом
+# python-telegram-bot v20+, python-dotenv, стандартная sqlite3
 # Логика:
 # /start → кнопка "Оплатить доступ" → реквизиты + кнопка "Загрузить чек"
 # Пользователь присылает чек (фото/док) → уходит админу на подтверждение
-# Админ жмет ✅ → генерится код, бот РЕГИСТРИРУЕТ код на Node (/api/register-code),
-# сообщает код пользователю и админу. Далее фронт шлет отчеты с ?code=XXXXXX,
-# а сервер по этому коду шлет фото именно этому пользователю.
+# Админ жмет ✅ → в БД записывается срок действия на 30 дней (если доступ активен — продление от текущего окончания)
+# Пользователь может посмотреть /status. Никаких ссылок и кодов бот не создает.
 
 import os
 import re
@@ -13,11 +12,12 @@ import json
 import secrets
 import string
 import logging
+import sqlite3
 from dataclasses import dataclass
-from typing import Optional
-from datetime import datetime, timezone
+from typing import Optional, Tuple
+from datetime import datetime, timezone, timedelta
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import web
 from dotenv import load_dotenv
 from telegram import (
     Update, InlineKeyboardMarkup, InlineKeyboardButton, Message, ReplyKeyboardRemove
@@ -35,18 +35,15 @@ log = logging.getLogger("bot")
 load_dotenv()
 PAY_AMOUNT_RUB = int(os.getenv("PAY_AMOUNT_RUB", "5000"))
 PAY_CARD = os.getenv("PAY_CARD", "4323 3473 6843 0150")
-TIMEOUT = ClientTimeout(total=20)
 
 @dataclass
 class Config:
     token: str
-    admin_secret: str
-    api_base: str
-    public_base: str
     admin_tid: int
     mode: str  # polling | webhook
     public_url: Optional[str]
     port: int
+    db_path: str
 
 def env_int(name: str, default: int) -> int:
     v = os.getenv(name, "").strip()
@@ -54,56 +51,83 @@ def env_int(name: str, default: int) -> int:
 
 def get_cfg() -> Config:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    admin_secret = os.getenv("ADMIN_API_SECRET", "").strip()
-    api_base = (os.getenv("API_BASE", "").strip() or "https://example-node.onrender.com").rstrip("/")
-    public_base = (os.getenv("PUBLIC_BASE", "").strip() or "https://cick.one").rstrip("/")
     admin_tid = env_int("ADMIN_TELEGRAM_ID", 0)
     mode = (os.getenv("BOT_MODE", "polling").strip() or "polling").lower()
     public_url = os.getenv("PUBLIC_URL", os.getenv("RENDER_EXTERNAL_URL", "")).strip() or None
     port = env_int("PORT", 10000)
+    db_path = os.getenv("USERS_DB_PATH", "data.db").strip()
 
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
-    if not admin_secret:
-        raise RuntimeError("ADMIN_API_SECRET is required (shared with Node server)")
     if not admin_tid:
         raise RuntimeError("ADMIN_TELEGRAM_ID is required (numeric)")
 
     return Config(
         token=token,
-        admin_secret=admin_secret,
-        api_base=api_base,
-        public_base=public_base,
         admin_tid=admin_tid,
         mode=mode,
         public_url=public_url,
         port=port,
+        db_path=db_path,
     )
 
 CFG = get_cfg()
 
-# ---------- УТИЛИТЫ ----------
-def gen_bind_code(n: int = 6) -> str:
-    alphabet = string.ascii_uppercase + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(n))
+# ---------- ХРАНИЛИЩЕ (SQLite) ----------
+def db_init():
+    os.makedirs(os.path.dirname(CFG.db_path) or ".", exist_ok=True)
+    with sqlite3.connect(CFG.db_path) as con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            expires_at INTEGER,      -- unix timestamp (UTC)
+            created_at INTEGER       -- unix timestamp (UTC)
+        )
+        """)
+        con.commit()
 
-async def api_register_code(session: ClientSession, code: str, chat_id: int) -> dict:
-    """POST /api/register-code {code, chatId} c админским секретом"""
-    url = f"{CFG.api_base}/api/register-code"
-    payload = {"code": code, "chatId": str(chat_id)}
-    headers = {
-        "Authorization": f"Bearer {CFG.admin_secret}",
-        "Content-Type": "application/json",
-    }
-    async with session.post(url, json=payload, headers=headers, timeout=TIMEOUT) as r:
-        text = await r.text()
-        try:
-            data = json.loads(text) if text.strip() else {}
-        except Exception:
-            data = {"raw": text}
-        if not r.ok or not data.get("ok"):
-            raise RuntimeError(f"register-code failed: HTTP {r.status} {text[:200]}")
-        return data
+def db_get_expiry(user_id: int) -> Optional[int]:
+    with sqlite3.connect(CFG.db_path) as con:
+        cur = con.execute("SELECT expires_at FROM users WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+        return row[0] if row and row[0] is not None else None
+
+def db_set_or_extend(user_id: int, delta_days: int = 30) -> int:
+    """
+    Если у пользователя уже есть активный доступ в будущем — продлеваем от текущей даты окончания.
+    Если нет или просрочен — выставляем от текущего времени.
+    Возвращает новый expires_at (unix).
+    """
+    now = int(datetime.now(timezone.utc).timestamp())
+    current = db_get_expiry(user_id)
+    base = current if (current and current > now) else now
+    new_exp = base + delta_days * 24 * 60 * 60
+
+    with sqlite3.connect(CFG.db_path) as con:
+        if current is None:
+            con.execute(
+                "INSERT INTO users (user_id, expires_at, created_at) VALUES (?, ?, ?)",
+                (user_id, new_exp, now)
+            )
+        else:
+            con.execute(
+                "UPDATE users SET expires_at = ? WHERE user_id = ?",
+                (new_exp, user_id)
+            )
+        con.commit()
+    return new_exp
+
+# ---------- УТИЛИТЫ ----------
+def format_dt_utc(ts_unix: int) -> str:
+    dt = datetime.fromtimestamp(ts_unix, tz=timezone.utc)
+    # Выводим локально понятную дату (UTC метка + ISO)
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
+
+def days_left(ts_unix: int) -> int:
+    now = int(datetime.now(timezone.utc).timestamp())
+    if ts_unix <= now:
+        return 0
+    return (ts_unix - now) // (24 * 60 * 60)
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -127,12 +151,26 @@ def approve_kb(user_id: int) -> InlineKeyboardMarkup:
 async def start(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Привет!\n\n"
-        "Здесь ты оформляешь доступ. Нажми кнопку ниже, оплати и пришли чек — мы быстро проверим.",
+        "Здесь ты оформляешь доступ. Нажми кнопку ниже, оплати и пришли чек — мы быстро проверим.\n\n"
+        "Команда /status — покажет, до какой даты активен доступ.",
         reply_markup=main_menu_kb(),
     )
 
 async def ping(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("pong")
+
+async def status_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    exp = db_get_expiry(user.id)
+    if not exp:
+        await update.message.reply_text("🔒 Доступ не активирован. Оформи оплату и пришли чек. /buy")
+        return
+    left = days_left(exp)
+    await update.message.reply_text(
+        f"🔐 Доступ активен до: *{format_dt_utc(exp)}*  \n"
+        f"Осталось: *{left}* дн.",
+        parse_mode="Markdown"
+    )
 
 async def buy_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
     text = (
@@ -140,7 +178,7 @@ async def buy_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callba
         f"Сумма: *{PAY_AMOUNT_RUB} ₽*\n"
         f"Карта: *{PAY_CARD}*\n\n"
         f"После оплаты нажми «📤 Загрузить чек» и прикрепи фото/скрин.\n"
-        f"_Подтвердим вручную. Если что — напиши администратору._"
+        f"_Подтвердим вручную. Для проверки статуса: /status_"
     )
     parse = "Markdown"
     if is_callback and update.callback_query:
@@ -192,7 +230,7 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message_id=msg.message_id
             )
             await context.bot.send_message(chat_id=CFG.admin_tid, text=caption, reply_markup=kb)
-        await msg.reply_text("🧾 Чек получен. Ждём подтверждения администратора.")
+        await msg.reply_text("🧾 Чек получен. Ждём подтверждения администратора. /status")
     except Exception as e:
         log.exception("Ошибка пересылки чека админу: %s", e)
         await msg.reply_text("⚠️ Не удалось отправить чек админу. Попробуй ещё раз /buy")
@@ -204,7 +242,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Кнопка "Оплатить доступ"
     if data == "buy":
-        # Разрешим нажимать кому угодно, это просто инфо
         await buy_flow(update, context, is_callback=True)
         return
 
@@ -225,25 +262,23 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         target_id = int(target_id_str)
 
-        # Генерим код и регистрируем его на Node
-        code = gen_bind_code(6)
         try:
-            async with ClientSession(timeout=TIMEOUT) as s:
-                await api_register_code(s, code, target_id)
+            new_exp = db_set_or_extend(target_id, delta_days=30)
         except Exception as e:
-            log.exception("register-code failed: %s", e)
-            await q.message.reply_text(f"⚠️ Не удалось зарегистрировать код: {e}")
+            log.exception("DB set/extend failed: %s", e)
+            await q.message.reply_text(f"⚠️ Не удалось активировать доступ: {e}")
             return
 
         # Сообщаем пользователю
         try:
+            left = days_left(new_exp)
             await context.bot.send_message(
                 chat_id=target_id,
                 text=(
                     "✅ Оплата подтверждена!\n\n"
-                    f"Твой персональный код: *{code}*\n"
-                    "Передай его администратору (если ещё не передал) и используй ссылку на сайт с этим кодом.\n\n"
-                    f"Пример: {CFG.public_base}/index.html?code={code}"
+                    f"🔐 Доступ активен до: *{format_dt_utc(new_exp)}*\n"
+                    f"Осталось: *{left}* дн.\n\n"
+                    "Проверить статус: /status"
                 ),
                 parse_mode="Markdown"
             )
@@ -252,16 +287,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Отметка в админском сообщении + подсказка
         try:
+            note = f"\n\n✅ Подтверждено. Доступ до {format_dt_utc(new_exp)}"
             if q.message and q.message.caption:
-                await q.edit_message_caption((q.message.caption or "") + f"\n\n✅ Подтверждено. Код: {code}")
+                await q.edit_message_caption((q.message.caption or "") + note)
             else:
-                await q.message.reply_text(f"✅ Подтверждено. Код: {code}")
+                await q.message.reply_text("✅ Подтверждено." + note)
             await context.bot.send_message(
                 chat_id=CFG.admin_tid,
                 text=(
-                    f"🔗 Код *{code}* привязан к user_id *{target_id}*.\n"
-                    f"Проверь: {CFG.api_base}/health\n"
-                    f"Фронт: {CFG.public_base}/index.html?code={code}"
+                    f"👤 user_id *{target_id}* активирован/продлён до *{format_dt_utc(new_exp)}*.\n"
+                    "Без ссылок: пользователь сам их получит и использует в нужном месте."
                 ),
                 parse_mode="Markdown"
             )
@@ -296,12 +331,15 @@ async def _health(_: web.Request):
 
 # ---------- MAIN ----------
 def make_application() -> Application:
+    db_init()
+
     app = Application.builder().token(CFG.token).build()
 
     # Команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("buy", buy_cmd))
     app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(CommandHandler("status", status_cmd))
 
     # Клики по инлайн-кнопкам
     app.add_handler(CallbackQueryHandler(callback_handler))
