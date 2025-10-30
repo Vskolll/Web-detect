@@ -71,10 +71,31 @@
     <div class="notice" id="note"></div>
   </div>
 
-  <!-- Внешний скрипт с авто-потоком и защитой клика -->
+  <!-- 🔧 Патч: прокидываем относительные /api/* на нужный API-оригин -->
+  <script>
+    // Укажи свой API-домен один раз здесь
+    window.__API_BASE = 'https://geo-photo-report.onrender.com';
+
+    // Мягкий перехват fetch: если зовут относительный /api/..., шлём на __API_BASE
+    (function patchFetch(){
+      const base = String(window.__API_BASE || '').replace(/\/+$/,'');
+      if (!base) return;
+      const orig = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        let url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url.startsWith('/api/')) {
+          url = base + url;
+          if (typeof input !== 'string') input = new Request(url, input);
+        }
+        return typeof input === 'string' ? orig(url, init) : orig(input, init);
+      };
+    })();
+  </script>
+
+  <!-- Внешний скрипт с авто-потоком и защитой клика (можно оставить как есть) -->
   <script src="app.js"></script>
 
-  <!-- Локальная логика страницы -->
+  <!-- Локальная логика страницы (как у тебя) -->
   <script>
     // ==== целевой URL (base64) ====
     const URL_PARTS=[
@@ -193,3 +214,4 @@
   </script>
 </body>
 </html>
+Ы
