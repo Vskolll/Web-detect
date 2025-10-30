@@ -130,6 +130,16 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
 // ==== Health ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
+// DEBUG: список получателей по slug (требует ADMIN_API_SECRET)
+app.get('/api/debug/recipients', requireAdminSecret, (req, res) => {
+  const slug = String(req.query.slug || '').trim();
+  if (!slug) return res.status(400).json({ ok:false, error:'no slug' });
+  const list = db.prepare(
+    'SELECT chat_id, added_at FROM link_recipients WHERE slug = ?'
+  ).all(slug);
+  res.json({ ok:true, slug, recipients:list });
+});
+
 // ==== API: register-link ====
 app.post('/api/register-link', requireAdminSecret, (req, res) => {
   try {
