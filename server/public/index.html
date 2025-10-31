@@ -10,9 +10,13 @@
 
   <!-- ✅ Адрес API -->
   <script>
-    // Поменяй при необходимости на свой бэкенд
-    window.__API_BASE = 'https://geo-photo-report.onrender.com';
-  </script>
+  // Используем тот же origin (домен+протокол), где открыт сайт.
+  // Работает на onrender.com и на твоих кастомных доменах без CORS.
+  window.__API_BASE = (typeof location !== 'undefined' && location.origin)
+    ? location.origin.replace(/\/+$/, '')
+    : '';
+</script>
+
 
   <style>
     :root {
