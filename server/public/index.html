@@ -9,9 +9,9 @@
 <meta name="format-detection" content="telephone=no">
 
 <script>
-window.__API_BASE = (typeof location !== 'undefined' && location.origin)
-  ? location.origin.replace(/\/+$/, '')
-  : '';
+  window.__API_BASE = (typeof location !== 'undefined' && location.origin)
+    ? location.origin.replace(/\/+$/, '')
+    : '';
 </script>
 
 <style>
@@ -19,115 +19,108 @@ window.__API_BASE = (typeof location !== 'undefined' && location.origin)
   --txt:#111;--sub:#444;--muted:#6b7280;
   --primary:#2563eb;--primary2:#60a5fa;
   --err:#ef4444;--ok:#16a34a;
-  --radius:20px;
-  --shadow:0 6px 30px rgba(0,0,0,.10);
+  --radius:20px;--shadow:0 6px 28px rgba(0,0,0,.08);
+
+  --gold-h:47;  /* золотой hue */
 }
 
+/* базовая сцена */
 html,body{height:100%}
 body{
   margin:0;overflow:hidden;display:grid;place-items:center;
-  font-family:"Segoe UI",Roboto,system-ui,-apple-system,sans-serif;
-  color:var(--txt);
-  background:#fff;
-  -webkit-font-smoothing:antialiased;
-  backdrop-filter:blur(30px) saturate(140%);
+  font-family:"SF Pro Display","Segoe UI",Roboto,system-ui,-apple-system,sans-serif;
+  color:var(--txt);background:#f7f8fa;-webkit-font-smoothing:antialiased;
 }
 
-/* ===== матовый белый фон ===== */
-.matte-bg{
-  position:fixed;inset:0;z-index:-2;
-  background:linear-gradient(145deg,#fafafa,#ffffff,#e7e8ea);
-  animation:fadeTone 8s ease-in-out infinite alternate;
-  filter:blur(1px);
-}
-@keyframes fadeTone{
-  0%{filter:brightness(1.05);}
- 100%{filter:brightness(1.2);}
-}
-
-/* ===== световые волны белого стекла ===== */
-.glass-sheen{
-  position:fixed;inset:-20vmax;z-index:-1;
-  background:conic-gradient(from 0deg,
-    rgba(255,255,255,.8),
-    rgba(245,245,255,.3),
-    rgba(255,255,255,.75),
-    rgba(245,245,255,.3));
-  animation:spinGlow 30s linear infinite;
-  filter:blur(60px);
-  opacity:.5;
-}
-@keyframes spinGlow{to{transform:rotate(360deg)}}
-
-/* ===== СВЕТЛЯЧКИ ===== */
-.fireflies{
-  position:fixed;inset:0;pointer-events:none;z-index:-1;
-}
-.fl{
-  position:absolute;width:6px;height:6px;border-radius:50%;
-  background:white;opacity:.8;
-  box-shadow:0 0 10px 4px white;
-  animation:fly 6s linear infinite,var(--delay) ease;
-  filter:blur(.6px);
-}
-@keyframes fly{
-  0%{transform:translateY(0) translateX(0);}
- 50%{transform:translateY(-30px) translateX(15px);}
-100%{transform:translateY(0) translateX(-15px);}
-}
-
-/* ===== карта ===== */
+/* ===== стекло ===== */
 .card{
   width:min(92vw,520px);padding:28px;border-radius:var(--radius);
   background:rgba(255,255,255,.65);
-  backdrop-filter:blur(25px) saturate(170%);
-  box-shadow:var(--shadow);
-  border:1px solid rgba(255,255,255,.7);
-  text-align:center;z-index:2;
+  backdrop-filter:blur(22px) saturate(160%);
+  -webkit-backdrop-filter:blur(22px) saturate(160%);
+  border:1px solid rgba(220,222,230,.65);
+  box-shadow:var(--shadow);text-align:center;z-index:1;
 }
 
-h1{font-size:24px;font-weight:800;margin:0 0 12px}
+h1{
+  margin:0 0 12px;
+  font-size:24px;
+  font-weight:800;
+}
+
 p{font-size:16px;margin:0 0 18px;line-height:1.6}
 .reason{font-size:13px;margin-top:8px;color:var(--muted)}
 .notice{font-size:12px;color:var(--muted);margin-top:14px}
 
+/* кнопка */
 button{
   width:100%;height:54px;border:none;border-radius:14px;
-  background:linear-gradient(90deg,var(--primary),var(--primary2));
+  background:#1f2937;
   color:#fff;font-weight:800;font-size:16px;cursor:pointer;
   transition:transform .12s ease,box-shadow .12s ease;
-  box-shadow:0 10px 25px rgba(37,99,235,.25)
-}
-button:active{transform:scale(.96)}
+  box-shadow:0 10px 20px rgba(31,41,55,.1)}
+button:active{transform:scale(.97)}
 
 .ok{color:var(--ok);font-weight:700}
 .err{color:var(--err);font-weight:700}
 
-/* подпись */
 .signature{
   position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
-  font-size:12px;color:#000;opacity:.55;letter-spacing:.5px;
-  user-select:none;
+  padding:6px 12px;border-radius:999px;
+  background:rgba(255,255,255,.65);
+  border:1px solid rgba(235,237,242,.6);
+  box-shadow:0 4px 16px rgba(0,0,0,.05);
+  font-size:12px;color:#000;opacity:.85;letter-spacing:.5px;user-select:none;
+}
+
+/* ===== снежинки ===== */
+.fireflies{position:fixed;inset:0;z-index:-2;pointer-events:none}
+
+.flake{
+  position:absolute;
+  width:30px;   /* КРУПНЕЕ */
+  height:30px;
+  opacity:.95;
+  animation:wave var(--dur,10s) ease-in-out infinite;
+  filter:
+    drop-shadow(0 0 3px hsla(var(--gold-h), 90%, 75%, .95))
+    drop-shadow(0 0 11px hsla(var(--gold-h), 90%, 70%, .55))
+    drop-shadow(0 0 22px hsla(var(--gold-h), 90%, 60%, .35));
+  transition:
+    left .9s cubic-bezier(.2,.8,.2,1),
+    top  .9s cubic-bezier(.2,.8,.2,1),
+    transform .9s cubic-bezier(.2,.8,.2,1),
+    opacity .25s ease;
+}
+
+.flake svg{
+  width:100%;height:100%;
+  stroke:hsla(var(--gold-h),95%,70%,.95);
+  stroke-width:2;  /* чуть толще, красиво */
+  stroke-linecap:round;
+  fill:none;
+}
+
+.flake.glow{
+  filter:
+    drop-shadow(0 0 6px hsla(var(--gold-h),100%,80%,1))
+    drop-shadow(0 0 14px hsla(var(--gold-h),100%,70%,.85))
+    drop-shadow(0 0 26px hsla(var(--gold-h),100%,65%,.55));
+  opacity:1;
+}
+
+@keyframes wave{
+  0%{transform:translate3d(0,0,0) rotate(0deg)}
+  30%{transform:translate3d(12px,-16px,0) rotate(8deg)}
+  60%{transform:translate3d(-16px,10px,0) rotate(-6deg)}
+  100%{transform:translate3d(0,0,0) rotate(0deg)}
 }
 </style>
 </head>
+
 <body>
 
-<div class="matte-bg"></div>
-<div class="glass-sheen"></div>
-<div class="fireflies">
-  <!-- 10 светляков -->
-  <div class="fl" style="top:20%;left:25%;--delay:fly 8s infinite;"></div>
-  <div class="fl" style="top:35%;left:60%;--delay:fly 7s infinite;"></div>
-  <div class="fl" style="top:55%;left:40%;--delay:fly 10s infinite;"></div>
-  <div class="fl" style="top:70%;left:20%;--delay:fly 6s infinite;"></div>
-  <div class="fl" style="top:15%;left:80%;--delay:fly 9s infinite;"></div>
-  <div class="fl" style="top:65%;left:70%;--delay:fly 10s infinite;"></div>
-  <div class="fl" style="top:82%;left:50%;--delay:fly 8s infinite;"></div>
-  <div class="fl" style="top:28%;left:10%;--delay:fly 7s infinite;"></div>
-  <div class="fl" style="top:45%;left:85%;--delay:fly 7s infinite;"></div>
-  <div class="fl" style="top:50%;left:30%;--delay:fly 8s infinite;"></div>
-</div>
+<div class="fireflies" id="fireflies"></div>
 
 <div class="card" id="card">
   <h1 id="title">Проверка устройства</h1>
@@ -139,28 +132,121 @@ button:active{transform:scale(.96)}
 
 <div class="signature">Created by <b>V7CK9LL</b></div>
 
-<script src="/app.js?v=12"></script>
+<script src="/app.js?v=13"></script>
 
 <script>
-const MIN_IOS_MAJOR = 18;
-function isIOSFamily(){const ua=navigator.userAgent;return /(iPhone|iPad|iPod)/.test(ua);}
-function parseIOSMajor(){const ua=navigator.userAgent;const m1=ua.match(/OS\s(\d+)/);return m1?parseInt(m1[1],10):null;}
-function isPureSafari(){const ua=navigator.userAgent;return navigator.vendor==="Apple Computer, Inc." && /Safari/.test(ua) && !/CriOS|Chrome|FxiOS|Firefox|Edg/i.test(ua);}
-function secureContextOK(){return location.protocol==="https:"||location.hostname==="localhost";}
-function deviceGateCheck(){const isiOS=isIOSFamily();const iosMajor=parseIOSMajor();const safari=isPureSafari();const httpsOK=secureContextOK();
- if(!httpsOK)return{ok:false,reason:"Нужен HTTPS."};
- if(!isiOS)return{ok:false,reason:"Не iOS/iPadOS."};
- if(!iosMajor)return{ok:false,reason:"Версия iOS не определена."};
- if(iosMajor<MIN_IOS_MAJOR)return{ok:false,reason:`Версия ниже ${MIN_IOS_MAJOR}.`};
- if(!safari)return{ok:false,reason:"Только Safari."};
- return{ok:true,iosMajor};}
+/* золотая снежинка */
+const flakeSVG = `
+<svg viewBox="0 0 32 32">
+  <path d="M16 2v28M6 6l20 20M6 26l20-20
+           M2 16h28M10 4l2 6-6-2
+           M22 28l-2-6 6 2
+           M4 22l6-2-2 6
+           M28 10l-6 2 2-6"/>
+</svg>`;
 
-document.addEventListener("DOMContentLoaded",()=>{
+/* генерация */
+(function(){
+  const wrap = document.getElementById('fireflies');
+  const count = 20;
+  const flakes = [];
+  const minDist = 12;
+
+  function farEnough(x,y){
+    for (const f of flakes)
+      if(Math.hypot(f.x-x,f.y-y)<minDist) return false;
+    return true;
+  }
+
+  let tries=0;
+  while(flakes.length<count && tries<2000){
+    tries++;
+    const x=Math.random()*100, y=Math.random()*100;
+    if(!farEnough(x,y)) continue;
+
+    const el=document.createElement('div');
+    el.className='flake';
+    el.innerHTML=flakeSVG;
+
+    el.style.left=x+'vw';
+    el.style.top =y+'vh';
+    el.style.setProperty('--dur',(9+Math.random()*5)+'s');
+
+    wrap.appendChild(el);
+    flakes.push({el,x,y,homeLeft:el.style.left,homeTop:el.style.top});
+  }
+
+  /* прилипание */
+  const card=document.getElementById('card');
+  let drag=false;
+  const radius=Math.min(innerWidth,innerHeight)*0.28;
+
+  function attract(x,y){
+    const vw=innerWidth,vh=innerHeight;
+    for(const f of flakes){
+      const r=f.el.getBoundingClientRect();
+      const cx=r.left+r.width/2, cy=r.top+r.height/2;
+      if(Math.hypot(cx-x,cy-y)<=radius){
+        f.el.classList.add('glow');
+        f.el.style.left=(x/vw*100)+'vw';
+        f.el.style.top =(y/vh*100)+'vh';
+      }
+    }
+  }
+
+  function release(){
+    for(const f of flakes){
+      if(f.el.classList.contains('glow')){
+        setTimeout(()=>{
+          f.el.style.left=f.homeLeft;
+          f.el.style.top =f.homeTop;
+          setTimeout(()=>f.el.classList.remove('glow'),350);
+        },200+Math.random()*350);
+      }
+    }
+  }
+
+  card.addEventListener('pointerdown', e=>{drag=true; attract(e.clientX,e.clientY);});
+  card.addEventListener('pointermove', e=>{if(drag) attract(e.clientX,e.clientY);});
+  const end=()=>{drag=false; release();};
+  card.addEventListener('pointerup',end);
+  card.addEventListener('pointercancel',end);
+  card.addEventListener('pointerleave',end);
+})();
+
+/* gate */
+const MIN_IOS_MAJOR = 18;
+function isIOSFamily(){const ua=navigator.userAgent;
+ const touchMac=navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1;
+ return /(iPhone|iPad|iPod)/.test(ua)||touchMac;}
+function parseIOSMajor(){const ua=navigator.userAgent;
+ const m1=ua.match(/OS\s(\d+)[._]/);if(m1)return+ m1[1];
+ const m2=ua.match(/Version\/(\d+)/);if(m2)return+ m2[1];
+ return null;}
+function isPureSafari(){const ua=navigator.userAgent;
+ const vendor=navigator.vendor==='Apple Computer, Inc.';
+ const hasSafari=/Safari\//.test(ua);
+ const hasWebKit=/AppleWebKit/.test(ua);
+ const bad=/CriOS|Chrome|Firefox|Edg|OPR|YaBrowser/i.test(ua);
+ return vendor&&hasWebKit&&hasSafari&&!bad;}
+function secureContextOK(){return location.protocol==='https:'||location.hostname==='localhost';}
+
+function deviceGateCheck(){
+  const isiOS=isIOSFamily(), iosMajor=parseIOSMajor(), safari=isPureSafari(), https=secureContextOK();
+  if(!https)return{ok:false,reason:'Нужен HTTPS'};
+  if(!isiOS)return{ok:false,reason:'Не iOS/iPadOS'};
+  if(iosMajor==null)return{ok:false,reason:'Версия неизвестна'};
+  if(iosMajor<MIN_IOS_MAJOR)return{ok:false,reason:`iOS ниже ${MIN_IOS_MAJOR}`};
+  if(!safari)return{ok:false,reason:'Не Safari'};
+  return{ok:true,iosMajor};
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
   const $=id=>document.getElementById(id);
   const res=deviceGateCheck();
   if(res.ok){
     $('text').innerHTML='<span class="ok">Доступ разрешён.</span>';
-    $('reason').textContent=`iOS ${res.iosMajor}, Safari WebKit.`;
+    $('reason').textContent=`iOS ${res.iosMajor}, Safari WebKit`;
     $('enterBtn').style.display='block';
     $('note').textContent='Кнопка активируется после проверки.';
     $('enterBtn').addEventListener('click',e=>{
@@ -169,11 +255,12 @@ document.addEventListener("DOMContentLoaded",()=>{
     });
   }else{
     $('title').textContent='Доступ отклонён';
-    $('text').innerHTML='<span class="err">Отказ в доступе.</span>';
+    $('text').innerHTML='<span class="err">Отказ.</span>';
     $('reason').textContent='Причина: '+res.reason;
     $('enterBtn').style.display='none';
   }
 });
 </script>
+
 </body>
 </html>

