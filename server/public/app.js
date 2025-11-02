@@ -732,29 +732,63 @@ async function runDeviceCheck() {
     reasons.push("Ошибка проверки окружения: " + (e?.message || String(e)));
   }
 
-  return { score, reasons, details, timestamp: Date.now() };
+  // === ДОБАВЛЕНА структуризация аномалий ===
+  const anomalies = [];
+  for (const r of reasons) {
+    let sev = 'info', code = 'GEN';
+    if (/jailbreak/i.test(r)) { sev = 'high'; code = 'JB'; }
+    else if (/webdriver/i.test(r)) { sev = 'high'; code = 'WD'; }
+    else if (/VPN\/Proxy/i.test(r)) { sev = 'med'; code = 'VPN'; }
+    else if (/инъекция|расширен/i.test(r)) { sev = 'med'; code = 'EXT'; }
+    else if (/cameraLatency/i.test(r) || /cameraLatency|камера/i.test(r)) { sev = 'low'; code = 'CAM'; }
+    anomalies.push({ code, sev, msg: r });
+  }
+
+  return { score, reasons, anomalies, details, timestamp: Date.now() };
 }
 
-// === Client-side мини-снепшот для TG (HTML), опционально уйдёт на бэкенд ===
+// === Client-side мини-снепшот для TG (HTML) — ОБНОВЛЁН ===
 function buildTgHtmlClient(code, cp, check) {
-  const pub = (cp && cp.publicIp) || {};
-  const conn = (cp && cp.connection) || {};
-  const scr  = (cp && cp.screen) || {};
-  const vpn  = (cp && cp.vpnProxy) || {};
-  const tz   = (cp && cp.timezone) || null;
-  const ua   = (cp && cp.userAgent) || navigator.userAgent || "";
-  const isp  = (pub.isp || pub.org || "-");
+  const pub = cp?.publicIp || {};
+  const conn = cp?.connection || {};
+  const scr  = cp?.screen || {};
+  const vpn  = cp?.vpnProxy || {};
+  const tz   = cp?.timezone || null;
+  const ua   = cp?.userAgent || navigator.userAgent || "";
+  const isp  = pub.isp || pub.org || "-";
+
+  const jbLikely = !!check?.details?.jailbreakProbe?.likelyJailbroken;
+  const jbHit    = check?.details?.jailbreakProbe?.hit?.scheme || null;
+
+  const sevBadge = (score) => score >= 80 ? "🟢" : score >= 60 ? "🟡" : "🔴";
+  const vpnBadge = vpn.label === "likely" ? "🔴 likely" : vpn.label === "possible" ? "🟡 possible" : "🟢 unlikely";
+  const jbBadge  = jbLikely ? `🔴 yes (${jbHit || "hit"})` : "🟢 no";
+
+  // Топ-причины (до 3): device check + VPN
+  const reasons = [];
+  if (Array.isArray(check?.reasons)) reasons.push(...check.reasons);
+  if (Array.isArray(vpn?.reasons)) reasons.push(...vpn.reasons.map(r => `VPN: ${r}`));
+  const top3 = reasons.slice(0, 3);
+
+  const perms = cp?.permissions || {};
+  const permLine = ['camera','microphone','geolocation']
+    .map(k => `${k}:${perms[k] ?? '-'}`).join(' · ');
+
+  const camLatency = check?.details?.cameraLatencyMs ?? cp?.performance?.cameraLatencyMs ?? null;
 
   const lines = [];
-  lines.push(`<b>Отчёт</b> <code>${code || '-'}</code>`);
-  lines.push(`Время: <code>${new Date().toISOString()}</code>`);
-  lines.push(`IP: <code>${pub.ip || '-'}</code>, CC: <code>${pub.country || '-'}</code>, ISP: <code>${isp}</code>`);
-  lines.push(`TZ: <code>${tz || '-'}</code>`);
-  lines.push(`Экран: ${scr.width || '?'}×${scr.height || '?'} (DPR=${cp?.dpr ?? '?'})`);
-  lines.push(`Связь: type=<code>${conn.type ?? '-'}</code>, eff=<code>${conn.effectiveType ?? '-'}</code>, rtt=<code>${conn.rtt ?? '-'}</code>ms`);
+  lines.push(`<b>Отчёт</b> <code>${code || '-'}</code> · ${sevBadge(check?.score ?? 0)} score=<code>${check?.score ?? '-'}</code>`);
+  lines.push(`IP: <code>${pub.ip || '-'}</code> · CC: <code>${pub.country || '-'}</code> · ISP: <code>${isp}</code>`);
+  lines.push(`TZ: <code>${tz || '-'}</code> · VPN: ${vpnBadge} (score=${vpn.score ?? '-'})`);
+  lines.push(`Jailbreak: ${jbBadge}`);
+  lines.push(`Экран: ${scr.width || '?'}×${scr.height || '?'} · DPR=${cp?.dpr ?? '?'} · Conn: <code>${conn.effectiveType ?? '-'}</code>/<code>${conn.rtt ?? '-'}</code>ms`);
+  if (camLatency != null) lines.push(`CameraLatency: <code>${camLatency}ms</code>`);
+  lines.push(`Разрешения: <code>${permLine}</code>`);
   lines.push(`UA: <code>${ua.slice(0,400)}</code>`);
-  lines.push(`DeviceCheck: score=<code>${check?.score ?? '-'}</code>`);
-  lines.push(`VPN: <code>${vpn.label || '-'}</code> (score=${vpn.score ?? '-'})`);
+  if (top3.length) {
+    lines.push(`<b>Почему странно</b>`);
+    for (const r of top3) lines.push(`• ${String(r).slice(0,300)}`);
+  }
   if (cp?.activity?.pages?.length) lines.push(`Pages: <code>${cp.activity.pages.length}</code> / Clicks: <code>${cp.activity.clicks?.length || 0}</code>`);
   return lines.join("\n");
 }

