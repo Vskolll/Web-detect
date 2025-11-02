@@ -1,10 +1,12 @@
-// === server/index.js (photo+caption + one HTML doc; no text JSON chunks) ===
+// === server/index.js (photo+caption + one HTML doc; patched JB logic) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
+
+// Node 18+ имеет глобальные fetch/FormData/Blob
 
 // ==== ENV ====
 const BOT_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -139,35 +141,60 @@ function normVer(iosVersion) {
   }
   return null;
 }
+
+// --- JB: игнор кастомных схем и жёсткая проверка "opened"
+const IGNORE_SCHEMES = [/^custom:/i, /^mytest:/i];
+function isIgnoredScheme(s = '') {
+  return IGNORE_SCHEMES.some(rx => rx.test(String(s)));
+}
+
 function deriveStatus({ iosVersion, platform, cp = {}, dc = {} }) {
   const v = normVer(iosVersion);
-  const iosOk       = v != null && v >= 18;
-  const platformOk  = /iPhone|iPad/i.test(String(platform || ''));
-  const jbLabel     = (cp?.jbProbesActive?.summary?.label || 'n/a').toLowerCase();
-  const jbOk        = jbLabel.includes('negative') || jbLabel === 'n/a';
-  const dcWords     = Array.isArray(cp?.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
-  const dcOk        = !dcWords;
-  const perms       = cp?.permissions || {};
-  const geoOk       = perms.geolocation === 'granted' || perms.geolocation === true;
-  const camOk       = perms.camera === 'granted' || perms.camera === true;
-  const micOk       = perms.microphone === 'granted' || perms.microphone === true;
+  const iosOk      = v != null && v >= 18;
+  const platformOk = /iPhone|iPad/i.test(String(platform || ''));
+
+  // --- JB пересчёт по факту результатов
+  const jb            = cp?.jbProbesActive || {};
+  const jbRowsRaw     = Array.isArray(jb.results) ? jb.results : [];
+  const jbRows        = jbRowsRaw.filter(r => !isIgnoredScheme(r?.scheme));
+  const anyOpened     = jbRows.some(r => r?.opened === true);
+
+  const labelRaw      = String(jb?.summary?.label || '').toLowerCase();
+  const labelsClean   = new Set(['', 'n/a', 'negative', 'unlikely', 'none', 'clean', 'no', 'absent']);
+  const jbOk          = !anyOpened && labelsClean.has(labelRaw);
+  const jbLabel       = jbOk ? (labelRaw || 'negative') : (labelRaw || 'positive');
+
+  // --- DC / ISP
+  const dcWords = Array.isArray(cp?.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
+  const dcOk    = !dcWords;
+
+  // --- Permissions
+  const perms  = cp?.permissions || {};
+  const geoOk  = perms.geolocation === 'granted' || perms.geolocation === true;
+  const camOk  = perms.camera === 'granted' || perms.camera === true;
+  const micOk  = perms.microphone === 'granted' || perms.microphone === true;
 
   // Требования допуска:
   const canLaunch = iosOk && platformOk && jbOk;
 
   return {
     iosOk, platformOk, jbOk, dcOk, geoOk, camOk, micOk,
-    jbLabel, dcWords, canLaunch
+    jbLabel, dcWords, canLaunch,
+    _jb: { rows: jbRows, rowsRaw: jbRowsRaw, anyOpened }
   };
 }
 
 // [HTML] — единый отчёт (чеклист + сводка + JB-таблица + сырой JSON)
 function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc }) {
-  const s  = deriveStatus({ iosVersion, platform, cp, dc });
-  const jb = cp?.jbProbesActive || {};
-  const jbSum = jb.summary || {};
-  const fp    = jb.firstPositive || null;
-  const jbRows = Array.isArray(jb.results) ? jb.results : []; // ✅ единственное объявление
+  const s   = deriveStatus({ iosVersion, platform, cp, dc });
+  const jb  = cp?.jbProbesActive || {};
+  const jbSum  = jb.summary || {};
+
+  // берём уже отфильтрованные строки из deriveStatus
+  const jbRows = Array.isArray(s?._jb?.rows)
+    ? s._jb.rows
+    : (Array.isArray(jb.results) ? jb.results.filter(r => !isIgnoredScheme(r?.scheme)) : []);
+  const fp = jbRows.find(r => r?.opened === true) || null;
 
   const pubIP = cp?.publicIp || {};
   const net   = cp?.network  || {};
@@ -200,9 +227,9 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
   `;
 
   const jbInfo = s.jbOk
-    ? `Нет джейлбрейка`
+    ? 'Нет джейлбрейка'
     : (fp?.scheme
-        ? `Сработала схема <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason||'signal')} ~${escapeHTML(fp.durationMs||'0')}ms)`
+        ? `Сработала схема <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason || 'signal')} ~${escapeHTML(fp.durationMs || '0')}ms)`
         : (Array.isArray(jbSum.reasons) && jbSum.reasons.length
             ? `Признаки: <code>${escapeHTML(jbSum.reasons.join(', '))}</code>`
             : 'Сигналов нет'));
@@ -252,7 +279,8 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
           `).join('')}
         </tbody>
       </table>
-      ${jbRows.length > 100 ? `<div class="muted">Показаны первые 100 из ${jbRows.length}</div>` : ''}
+      ${s?._jb?.rowsRaw && s._jb.rowsRaw.length !== jbRows.length
+        ? `<div class="muted">Отфильтрованы кастомные схемы (${s._jb.rowsRaw.length - jbRows.length})</div>` : ''}
     </div>
   ` : '';
 

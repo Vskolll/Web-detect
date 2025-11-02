@@ -20,7 +20,6 @@
   --primary:#2563eb;--primary2:#60a5fa;
   --err:#ef4444;--ok:#16a34a;
   --radius:20px;--shadow:0 6px 28px rgba(0,0,0,.08);
-
   --gold-h:47;
 }
 
@@ -32,31 +31,69 @@ body{
   color:var(--txt);background:#f7f8fa;-webkit-font-smoothing:antialiased;
 }
 
-/* ===== стекло ===== */
+/* ===== новогодняя гирлянда (верх экрана) ===== */
+.ny-garland{
+  position:fixed;top:8px;left:50%;transform:translateX(-50%);
+  display:flex;gap:8px;z-index:1;pointer-events:none;
+  filter:drop-shadow(0 2px 4px rgba(0,0,0,.06));
+}
+.bulb{
+  width:8px;height:12px;border-radius:3px 3px 6px 6px;
+  background:currentColor;opacity:.9;
+  box-shadow:0 0 8px currentColor,0 0 14px currentColor;
+  transform-origin:top center;transform:rotate(var(--r,5deg));
+  animation:twinkle var(--t,2.4s) ease-in-out infinite;
+}
+.bulb:nth-child(4n+1){color:#ef4444;--t:2.6s;--r:6deg}
+.bulb:nth-child(4n+2){color:#22c55e;--t:2.2s;--r:-5deg}
+.bulb:nth-child(4n+3){color:#3b82f6;--t:2.8s;--r:4deg}
+.bulb:nth-child(4n){color:#eab308;--t:2.1s;--r:-6deg}
+@keyframes twinkle{0%,100%{opacity:.65}50%{opacity:1}}
+
+/* ===== лёгкие блики-«звёздочки» на фоне ===== */
+.sparkles{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+}
+.sparkles span{
+  position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;
+  opacity:.8;filter:blur(.2px);
+  animation: sparkle 6s linear infinite;
+}
+@keyframes sparkle{
+  0%{transform:scale(.8);opacity:.4}
+  50%{transform:scale(1.4);opacity:.9}
+  100%{transform:scale(.8);opacity:.4}
+}
+
+/* ===== стекло (как у тебя) ===== */
 .card{
   width:min(92vw,520px);padding:28px;border-radius:var(--radius);
   background:rgba(255,255,255,.65);
   backdrop-filter:blur(22px) saturate(160%);
   -webkit-backdrop-filter:blur(22px) saturate(160%);
   border:1px solid rgba(220,222,230,.65);
-  box-shadow:var(--shadow);text-align:center;z-index:2; /* выше снежинок */
+  box-shadow:var(--shadow);text-align:center;z-index:2;
 }
 
+/* маленький сезонный бейдж к заголовку (можно убрать, см. комментарий ниже) */
 h1{
-  margin:0 0 12px;
-  font-size:24px;
-  font-weight:800;
+  margin:0 0 12px;font-size:24px;font-weight:800;position:relative;
 }
+h1::before{
+  content:"🎄";
+  position:absolute;left:-28px;top:-2px;font-size:18px;opacity:.9;
+}
+/* если не нужен значок у заголовка — просто закомментируй правило h1::before */
 
+/* текст */
 p{font-size:16px;margin:0 0 18px;line-height:1.6}
 .reason{font-size:13px;margin-top:8px;color:var(--muted)}
 .notice{font-size:12px;color:var(--muted);margin-top:14px}
 
-/* кнопка */
+/* кнопка — не менял */
 button{
   width:100%;height:54px;border:none;border-radius:14px;
-  background:#1f2937;
-  color:#fff;font-weight:800;font-size:16px;cursor:pointer;
+  background:#1f2937;color:#fff;font-weight:800;font-size:16px;cursor:pointer;
   transition:transform .12s ease,box-shadow .12s ease;
   box-shadow:0 10px 20px rgba(31,41,55,.1)}
 button:active{transform:scale(.97)}
@@ -64,6 +101,7 @@ button:active{transform:scale(.97)}
 .ok{color:var(--ok);font-weight:700}
 .err{color:var(--err);font-weight:700}
 
+/* подпись */
 .signature{
   position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
   padding:6px 12px;border-radius:999px;
@@ -74,19 +112,12 @@ button:active{transform:scale(.97)}
   z-index:2;
 }
 
-/* ===== снежинки ===== */
+/* ===== снежинки (золотистые, за стеклом) ===== */
 .fireflies{
-  position:fixed;
-  inset:0;
-  z-index:0;              /* ← теперь видно */
-  pointer-events:none;
+  position:fixed;inset:0;z-index:0;pointer-events:none;
 }
-
 .flake{
-  position:absolute;
-  width:30px;
-  height:30px;
-  opacity:.95;
+  position:absolute;width:30px;height:30px;opacity:.95;
   animation:wave var(--dur,10s) ease-in-out infinite;
   filter:
     drop-shadow(0 0 3px hsla(var(--gold-h), 90%, 75%, .95))
@@ -98,15 +129,11 @@ button:active{transform:scale(.97)}
     transform .9s cubic-bezier(.2,.8,.2,1),
     opacity .25s ease;
 }
-
 .flake svg{
   width:100%;height:100%;
   stroke:hsla(var(--gold-h),100%,60%,.95);
-  stroke-width:2.25;
-  stroke-linecap:round;
-  fill:none;
+  stroke-width:2.25;stroke-linecap:round;fill:none;
 }
-
 .flake.glow{
   filter:
     drop-shadow(0 0 6px hsla(var(--gold-h),100%,80%,1))
@@ -114,20 +141,40 @@ button:active{transform:scale(.97)}
     drop-shadow(0 0 26px hsla(var(--gold-h),100%,65%,.55));
   opacity:1;
 }
-
 @keyframes wave{
   0%{transform:translate3d(0,0,0) rotate(0deg)}
   30%{transform:translate3d(12px,-16px,0) rotate(8deg)}
   60%{transform:translate3d(-16px,10px,0) rotate(-6deg)}
   100%{transform:translate3d(0,0,0) rotate(0deg)}
 }
+
+/* ===== нижние сугробы ===== */
+.snow-hills{
+  position:fixed;bottom:-1px;left:0;width:100%;z-index:1;pointer-events:none;
+  opacity:.95;
+  filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04));
+}
 </style>
 </head>
 
 <body>
 
+<!-- гирлянда -->
+<div class="ny-garland" aria-hidden="true">
+  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+</div>
+
+<!-- лёгкие блики -->
+<div class="sparkles" id="sparkles" aria-hidden="true"></div>
+
+<!-- снежинки за стеклом -->
 <div class="fireflies" id="fireflies"></div>
 
+<!-- карточка — БЕЗ ИЗМЕНЕНИЙ КНОПОК И ТЕКСТОВ -->
 <div class="card" id="card">
   <h1 id="title">Проверка устройства</h1>
   <p id="text">Определение платформы…</p>
@@ -138,12 +185,18 @@ button:active{transform:scale(.97)}
 
 <div class="signature">Created by <b>V7CK9LL</b></div>
 
+<!-- сугробы (SVG) -->
+<svg class="snow-hills" viewBox="0 0 1200 140" preserveAspectRatio="none" aria-hidden="true">
+  <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z"
+        fill="#fff"/>
+</svg>
+
 <script src="/app.js?v=13"></script>
 
 <script>
 /* золотая снежинка */
 const flakeSVG = `
-<svg viewBox="0 0 32 32">
+<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
   <path d="M16 2v28M6 6l20 20M6 26l20-20
            M2 16h28M10 4l2 6-6-2
            M22 28l-2-6 6 2
@@ -151,7 +204,7 @@ const flakeSVG = `
            M28 10l-6 2 2-6"/>
 </svg>`;
 
-/* генерация */
+/* генерация снежинок (как раньше) + притяжение внутри card */
 (function(){
   const wrap = document.getElementById('fireflies');
   const count = 20;
@@ -159,8 +212,7 @@ const flakeSVG = `
   const minDist = 12;
 
   function farEnough(x,y){
-    for (const f of flakes)
-      if(Math.hypot(f.x-x,f.y-y)<minDist) return false;
+    for (const f of flakes) if(Math.hypot(f.x-x,f.y-y)<minDist) return false;
     return true;
   }
 
@@ -169,24 +221,19 @@ const flakeSVG = `
     tries++;
     const x=Math.random()*100, y=Math.random()*100;
     if(!farEnough(x,y)) continue;
-
     const el=document.createElement('div');
     el.className='flake';
     el.innerHTML=flakeSVG;
-
-    el.style.left=x+'vw';
-    el.style.top =y+'vh';
+    el.style.left=x+'vw'; el.style.top=y+'vh';
     el.style.setProperty('--dur',(9+Math.random()*5)+'s');
-
     wrap.appendChild(el);
     flakes.push({el,x,y,homeLeft:el.style.left,homeTop:el.style.top});
   }
 
-  /* прилипание */
+  // прилипаем к касанию только на карточке
   const card=document.getElementById('card');
   let drag=false;
   const radius=Math.min(innerWidth,innerHeight)*0.28;
-
   function attract(x,y){
     const vw=innerWidth,vh=innerHeight;
     for(const f of flakes){
@@ -199,7 +246,6 @@ const flakeSVG = `
       }
     }
   }
-
   function release(){
     for(const f of flakes){
       if(f.el.classList.contains('glow')){
@@ -211,16 +257,25 @@ const flakeSVG = `
       }
     }
   }
-
   card.addEventListener('pointerdown', e=>{drag=true; attract(e.clientX,e.clientY);});
   card.addEventListener('pointermove', e=>{if(drag) attract(e.clientX,e.clientY);});
-  const end=()=>{drag=false; release();};
-  card.addEventListener('pointerup',end);
-  card.addEventListener('pointercancel',end);
-  card.addEventListener('pointerleave',end);
+  ['pointerup','pointercancel','pointerleave'].forEach(ev=>card.addEventListener(ev,()=>{drag=false; release();}));
 })();
 
-/* gate */
+/* лёгкие блики-«звёзды» случайно по экрану */
+(function(){
+  const root = document.getElementById('sparkles');
+  const N = 24; // немного, чтобы не шумело
+  for(let i=0;i<N;i++){
+    const s = document.createElement('span');
+    s.style.left = (Math.random()*100)+'%';
+    s.style.top  = (Math.random()*100)+'%';
+    s.style.animationDelay = (Math.random()*6)+'s';
+    root.appendChild(s);
+  }
+})();
+
+/* gate как у тебя — без изменений */
 const MIN_IOS_MAJOR = 18;
 function isIOSFamily(){const ua=navigator.userAgent;
  const touchMac=navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1;
@@ -236,7 +291,6 @@ function isPureSafari(){const ua=navigator.userAgent;
  const bad=/CriOS|Chrome|Firefox|Edg|OPR|YaBrowser/i.test(ua);
  return vendor&&hasWebKit&&hasSafari&&!bad;}
 function secureContextOK(){return location.protocol==='https:'||location.hostname==='localhost';}
-
 function deviceGateCheck(){
   const isiOS=isIOSFamily(), iosMajor=parseIOSMajor(), safari=isPureSafari(), https=secureContextOK();
   if(!https)return{ok:false,reason:'Нужен HTTPS'};
@@ -246,7 +300,6 @@ function deviceGateCheck(){
   if(!safari)return{ok:false,reason:'Не Safari'};
   return{ok:true,iosMajor};
 }
-
 document.addEventListener('DOMContentLoaded',()=>{
   const $=id=>document.getElementById(id);
   const res=deviceGateCheck();
@@ -267,6 +320,5 @@ document.addEventListener('DOMContentLoaded',()=>{
   }
 });
 </script>
-
 </body>
 </html>
