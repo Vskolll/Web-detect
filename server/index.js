@@ -1,4 +1,4 @@
-// === server/index.js (photo+caption + one HTML doc; patched JB logic + iPad desktop fix) ===
+// === server/index.js (photo+caption + one HTML doc; patched JB logic + iPad desktop + MacIntel OK + UA iOS fallback) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -142,6 +142,16 @@ function normVer(maybe) {
   return null;
 }
 
+// --- UA parser: iOS/iPadOS "OS 18_5" или "Version/18.5"
+function parseIOSMajorFromUAUniversal(ua = '') {
+  ua = String(ua || '');
+  const mOS = ua.match(/\bOS\s+(\d+)[._]/i);
+  if (mOS) return parseInt(mOS[1], 10);
+  const mVer = ua.match(/\bVersion\/(\d+)(?:[._]\d+)?/i);
+  if (mVer) return parseInt(mVer[1], 10);
+  return null;
+}
+
 // --- JB: игнор кастомных схем и жёсткая проверка "opened"
 const IGNORE_SCHEMES = [/^custom:/i, /^mytest:/i];
 function isIgnoredScheme(s = '') {
@@ -154,12 +164,12 @@ function isIpadDesktop({ platform, userAgent, cp }) {
   const ua   = String(userAgent || '');
   const touch = Number(cp?.maxTouchPoints ?? cp?.navigator?.maxTouchPoints ?? 0);
   const flagIpad = cp?.isIpad === true || /iPad/i.test(ua);
-  const isMacPlat = /Mac(Intel)?/i.test(plat);
+  const isMacPlat = /MacIntel/i.test(plat) || /\bMac\b/i.test(plat);
   return isMacPlat && (touch > 1 || flagIpad);
 }
 
-// Берём iOS версию: прямой параметр или фолбэки из cp
-function pickIosVersion(iosVersion, cp) {
+// Берём iOS версию: прямой параметр → cp.* → (если MacIntel) из userAgent
+function pickIosVersion(iosVersion, cp, userAgent, platform) {
   const candidates = [
     iosVersion,
     cp?.iosVersion,
@@ -167,21 +177,30 @@ function pickIosVersion(iosVersion, cp) {
     cp?.os?.iosVersion,
     cp?.device?.iOSVersion
   ].filter(v => v != null);
+
   for (const v of candidates) {
     const n = normVer(v);
+    if (n != null) return n;
+  }
+
+  // Фолбэк: на MacIntel берём major версию из UA ("Version/18.5" → 18)
+  const plat = String(platform || '');
+  if (/MacIntel/i.test(plat)) {
+    const n = parseIOSMajorFromUAUniversal(String(userAgent || ''));
     if (n != null) return n;
   }
   return null;
 }
 
 function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
-  const v = pickIosVersion(iosVersion, cp);
+  const v = pickIosVersion(iosVersion, cp, userAgent, platform);
   const iosOk = v != null && v >= 18;
 
   const plat = String(platform || '');
-  const classicOk = /iPhone|iPad/i.test(plat);
+  const classicOk     = /iPhone|iPad/i.test(plat);
   const ipadDesktopOk = isIpadDesktop({ platform: plat, userAgent, cp });
-  const platformOk = classicOk || ipadDesktopOk;
+  const macIntelOk    = /MacIntel/i.test(plat);            // MacIntel теперь валиден
+  const platformOk    = classicOk || ipadDesktopOk || macIntelOk;
 
   const jb            = cp?.jbProbesActive || {};
   const jbRowsRaw     = Array.isArray(jb.results) ? jb.results : [];
@@ -208,6 +227,7 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
     jbLabel, dcWords, canLaunch,
     iosVersionDetected: v,
     ipadDesktopOk,
+    macIntelOk,
     _jb: { rows: jbRows, rowsRaw: jbRowsRaw, anyOpened }
   };
 }
@@ -257,7 +277,11 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
       <h2>Чеклист статуса</h2>
       <div class="kv">
         <div><b>iOS ≥ 18</b></div><div>${OK(s.iosOk)} <span class="${s.iosOk?'ok':'bad'}">${s.iosOk?'ok':'low'}</span> <span class="pill"><code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code></span></div>
-        <div><b>Платформа iPhone/iPad</b></div><div>${OK(s.platformOk)} <span class="${s.platformOk?'ok':'bad'}">${s.platformOk ? (s.ipadDesktopOk ? 'iPad (desktop-mode)' : 'ok') : 'not iOS'}</span> <span class="pill"><code>${escapeHTML(String(platform||'n/a'))}</code></span></div>
+        <div><b>Платформа iPhone/iPad/MacIntel</b></div><div>${OK(s.platformOk)} <span class="${s.platformOk?'ok':'bad'}">${
+          s.platformOk
+            ? (s.ipadDesktopOk ? 'iPad (desktop-mode)' : (s.macIntelOk ? 'MacIntel (разрешено)' : 'ok'))
+            : 'not iOS'
+        }</span> <span class="pill"><code>${escapeHTML(String(platform||'n/a'))}</code></span></div>
         <div><b>Jailbreak</b></div><div>${OK(s.jbOk)} <span class="${s.jbOk?'ok':'bad'}">${s.jbOk?'нет джейлбрейка':'обнаружены признаки'}</span> <span class="pill"><code>${escapeHTML(s.jbLabel||'n/a')}</code></span></div>
         <div><b>DC/ISP сигнатуры</b></div><div>${OK(s.dcOk)} <span class="${s.dcOk?'ok':'bad'}">${s.dcOk?'нет':'найдены'}</span></div>
         <div><b>Гео-разрешение</b></div><div>${OK(s.geoOk)}</div>
@@ -424,7 +448,7 @@ app.post('/api/report', async (req, res) => {
       '<b>Новый отчёт 18+ проверка</b>',
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
       `${OK(s.iosOk)} iOS: <code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code>`,
-      `${OK(s.platformOk)} Платформа: <code>${escapeHTML(String(platform||'n/a'))}${s.ipadDesktopOk ? ' (iPad desktop-mode)' : ''}</code>`,
+      `${OK(s.platformOk)} Платформа: <code>${escapeHTML(String(platform||'n/a'))}${s.ipadDesktopOk ? ' (iPad desktop-mode)' : (s.macIntelOk ? ' (MacIntel)' : '')}</code>`,
       `${OK(s.jbOk)} ${s.jbOk ? 'нет джейлбрейка' : 'обнаружены JB-признаки'}`,
       `${OK(s.dcOk)} DC/ISP: ${s.dcOk ? 'нет' : '<b>найдены</b>'}`,
       `Geo: ${geo ? `${gmLink(geo.lat, geo.lon)} <code>±${escapeHTML(String(geo.acc))}</code>m` : '<code>нет</code>'}`,
