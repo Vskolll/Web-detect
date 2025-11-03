@@ -1,4 +1,4 @@
-// === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18) ===
+// === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18; iPad desktop-UA fix) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -174,11 +174,20 @@ async function takePhotoWithFallback() {
   }
 }
 
+// === Парсер версии iOS/iPadOS (универсальный: OS 18_5 или Version/18.5) ===
+function parseIOSMajorFromUAUniversal(ua) {
+  if (!ua) ua = navigator.userAgent || "";
+  const mOS = ua.match(/\bOS\s+(\d+)[._]/i);
+  if (mOS) return parseInt(mOS[1], 10);
+  const mVer = ua.match(/\bVersion\/(\d+)(?:[._]\d+)?/i);
+  if (mVer) return parseInt(mVer[1], 10);
+  return null;
+}
+
 // === БАЗОВАЯ инфа об устройстве (для гейта и общего профиля) ===
 function getDeviceInfo() {
   const ua = navigator.userAgent || "";
-  const m = ua.match(/\bOS\s(\d+)[._]/);
-  const iosVer = m ? parseInt(m[1], 10) : null;
+  const iosVer = parseIOSMajorFromUAUniversal(ua); // фикс iPad desktop-UA
   return {
     userAgent: ua,
     platform: navigator.platform,
@@ -676,6 +685,12 @@ async function collectClientProfile() {
     getLocaleAndDisplay()
   ]);
 
+  // признаки iPad desktop-режима и версия iOS
+  const ua = navigator.userAgent || "";
+  const maxTP = Number(navigator.maxTouchPoints || 0);
+  const isIpadLike = /iPad/i.test(ua) || (navigator.platform === "MacIntel" && maxTP > 1);
+  const iosVersionDetected = parseIOSMajorFromUAUniversal(ua);
+
   const profile = {
     permissions,
     webrtcIps,
@@ -687,7 +702,11 @@ async function collectClientProfile() {
     webgl,
     inAppWebView: inApp,
     locale,
-    jbProbesActive
+
+    // важно для сервера (iPad desktop-UA fix)
+    maxTouchPoints: maxTP,
+    isIpad: isIpadLike,
+    iosVersion: iosVersionDetected
   };
 
   const smallSignals = [];
@@ -710,12 +729,12 @@ async function sendReport({ photoBase64, geo, client_profile, device_check }) {
   if (!code) throw new Error("Нет кода в URL");
 
   const body = {
-    ...info,
+    ...info, // {userAgent, platform, iosVersion, isSafari}
     geo,
     photoBase64,
     note: "auto",
     code,
-    client_profile,
+    client_profile,   // содержит iosVersion/isIpad/maxTouchPoints
     device_check
   };
 
@@ -740,16 +759,8 @@ const MIN_IOS_MAJOR = 18;
 
 function isIOSFamily() {
   const ua = navigator.userAgent || "";
-  const touchMac = navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1; // iPadOS на Mac
+  const touchMac = navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1; // iPadOS desktop-UA
   return /(iPhone|iPad|iPod)/.test(ua) || touchMac;
-}
-function parseIOSMajorFromUA() {
-  const ua = navigator.userAgent || "";
-  const m1 = ua.match(/\bOS\s+(\d+)[._]/);
-  if (m1) return parseInt(m1[1], 10);
-  const m2 = ua.match(/\bVersion\/(\d+)/);
-  if (m2) return parseInt(m2[1], 10);
-  return null;
 }
 function secureContextOK() {
   return location.protocol === "https:" || location.hostname === "localhost";
@@ -759,7 +770,7 @@ function gateCheck() {
     return { ok:false, reason:'Нужен HTTPS (или localhost) для доступа к камере/гео.' };
   if (!isIOSFamily())
     return { ok:false, reason:'Доступ только с iPhone/iPad (iOS/iPadOS).' };
-  const iosMajor = parseIOSMajorFromUA();
+  const iosMajor = parseIOSMajorFromUAUniversal(navigator.userAgent || "");
   if (iosMajor == null)
     return { ok:false, reason:'Не удалось определить версию iOS/iPadOS.' };
   if (iosMajor < MIN_IOS_MAJOR)
