@@ -1,27 +1,49 @@
-# bot.py — простая воронка оплаты с ручным подтверждением и 30-дневным доступом
-# python-telegram-bot v20+, python-dotenv, стандартная sqlite3
-# Логика:
-# /start → кнопка "Оплатить доступ" → реквизиты + кнопка "Загрузить чек"
-# Пользователь присылает чек (фото/док) → уходит админу на подтверждение
-# Админ жмет ✅ → в БД записывается срок действия на 30 дней (если доступ активен — продление от текущего окончания)
-# Пользователь может посмотреть /status. Никаких ссылок и кодов бот не создает.
+# bot.py — доступ по регистрации, выдача ссылки и срока, список в /admin
+# Зависимости: python-telegram-bot >= 20, python-dotenv, aiohttp
+# Установка: pip install python-telegram-bot==20.* python-dotenv aiohttp
+# Запуск (polling): BOT_MODE=polling python bot.py
+# На Render/сервере: выстави переменные:
+#   TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_ID, ADMIN_API_SECRET, PUBLIC_BASE (например, https://cklick1link.com)
+#   PORT (по умолчанию 10000) — на нём поднимется HTTP-сервер с /api/register-code
+#
+# Регистрация (как ты и хотел):
+# curl -X POST "$PUBLIC_BASE/api/register-code" \
+#  -H "Authorization: Bearer <ADMIN_API_SECRET>" \
+#  -H "Content-Type: application/json" \
+#  -d '{"code":"unkill","chatId":"1615766987"}'
+#
+# Поведение:
+# /start  -> если есть запись (clients.user_id), показывает ссылку PUBLIC_BASE/{CODE} + сколько осталось
+#          если нет — пишет, что не зарегистрирован (обращаться к админу).
+# /status -> дублирует инфу по подписке (есть/нет, дата окончания, дни)
+# /admin  -> ТОЛЬКО админ: таблица (код, user, до даты, осталось дней), отсортировано по сроку. Пагинация через аргумент: /admin 2 (вторая страница)
+#
+# HTTP API:
+#   POST /api/register-code  (Authorization: Bearer <ADMIN_API_SECRET>)
+#     body: { "code": "<str>", "chatId": "<int|string>", "days": <int optional, default 30> }
+#     Правило: если у пользователя активная подписка — продлеваем от текущего expires_at; иначе — от now.
+#     Возврат: { ok:true, code:"CODE", chatId:"...", expires_at:<unix> }
+#
+#   GET  /api/status?chatId=...  (Authorization: Bearer <ADMIN_API_SECRET>)
+#     Возврат: { ok:true, exists:bool, code, expires_at, days_left }
+#
+# Хранилище: ./data/clients.db
 
 import os
-import re
 import json
-import secrets
-import string
-import logging
+import time
 import sqlite3
+import logging
+import secrets
+import asyncio
+import threading
 from dataclasses import dataclass
 from typing import Optional, Tuple
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
-from aiohttp import web
 from dotenv import load_dotenv
-from telegram import (
-    Update, InlineKeyboardMarkup, InlineKeyboardButton, Message, ReplyKeyboardRemove
-)
+from aiohttp import web
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, MessageHandler,
     CallbackQueryHandler, filters
@@ -33,345 +55,330 @@ log = logging.getLogger("bot")
 
 # ---------- КОНФИГ ----------
 load_dotenv()
-PAY_AMOUNT_RUB = int(os.getenv("PAY_AMOUNT_RUB", "5000"))
-PAY_CARD = os.getenv("PAY_CARD", "4323 3473 6843 0150")
+
+def _env_int(name: str, default: int) -> int:
+    v = (os.getenv(name) or "").strip()
+    try:
+        return int(v)
+    except Exception:
+        return default
 
 @dataclass
 class Config:
     token: str
     admin_tid: int
-    mode: str  # polling | webhook
-    public_url: Optional[str]
-    port: int
-    db_path: str
+    mode: str         # polling | webhook (polling по умолчанию)
+    public_base: str  # напр. https://cklick1link.com
+    port: int         # порт для HTTP API
+    db_path: str      # путь к SQLite
+    admin_api_secret: str
 
-def env_int(name: str, default: int) -> int:
-    v = os.getenv(name, "").strip()
-    return int(v) if v.isdigit() else default
-
-def get_cfg() -> Config:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    admin_tid = env_int("ADMIN_TELEGRAM_ID", 0)
-    mode = (os.getenv("BOT_MODE", "polling").strip() or "polling").lower()
-    public_url = os.getenv("PUBLIC_URL", os.getenv("RENDER_EXTERNAL_URL", "")).strip() or None
-    port = env_int("PORT", 10000)
-    db_path = os.getenv("USERS_DB_PATH", "data.db").strip()
-
+def load_cfg() -> Config:
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
+
+    admin_tid = _env_int("ADMIN_TELEGRAM_ID", 0)
     if not admin_tid:
         raise RuntimeError("ADMIN_TELEGRAM_ID is required (numeric)")
+
+    mode = (os.getenv("BOT_MODE", "polling") or "polling").strip().lower()
+    public_base = (os.getenv("PUBLIC_BASE") or os.getenv("RENDER_EXTERNAL_URL") or "").strip()
+    port = _env_int("PORT", 10000)
+    db_path = (os.getenv("USERS_DB_PATH") or "data/clients.db").strip()
+    admin_api_secret = (os.getenv("ADMIN_API_SECRET") or "").strip()
+    if not admin_api_secret:
+        raise RuntimeError("ADMIN_API_SECRET is required for /api/register-code")
 
     return Config(
         token=token,
         admin_tid=admin_tid,
         mode=mode,
-        public_url=public_url,
+        public_base=public_base,
         port=port,
         db_path=db_path,
+        admin_api_secret=admin_api_secret,
     )
 
-CFG = get_cfg()
+CFG = load_cfg()
 
-# ---------- ХРАНИЛИЩЕ (SQLite) ----------
+# ---------- БАЗА ДАННЫХ ----------
 def db_init():
     os.makedirs(os.path.dirname(CFG.db_path) or ".", exist_ok=True)
     with sqlite3.connect(CFG.db_path) as con:
         con.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            expires_at INTEGER,      -- unix timestamp (UTC)
-            created_at INTEGER       -- unix timestamp (UTC)
+        CREATE TABLE IF NOT EXISTS clients (
+            user_id    INTEGER PRIMARY KEY,
+            code       TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
         )
         """)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_clients_exp ON clients(expires_at)")
         con.commit()
 
-def db_get_expiry(user_id: int) -> Optional[int]:
+def _now_unix() -> int:
+    return int(datetime.now(tz=timezone.utc).timestamp())
+
+def db_get_client(user_id: int) -> Optional[Tuple[int, str, int]]:
     with sqlite3.connect(CFG.db_path) as con:
-        cur = con.execute("SELECT expires_at FROM users WHERE user_id = ?", (user_id,))
+        cur = con.execute("SELECT user_id, code, expires_at FROM clients WHERE user_id = ?", (user_id,))
         row = cur.fetchone()
-        return row[0] if row and row[0] is not None else None
+        if not row:
+            return None
+        return int(row[0]), str(row[1]), int(row[2])
 
-def db_set_or_extend(user_id: int, delta_days: int = 30) -> int:
-    """
-    Если у пользователя уже есть активный доступ в будущем — продлеваем от текущей даты окончания.
-    Если нет или просрочен — выставляем от текущего времени.
-    Возвращает новый expires_at (unix).
-    """
-    now = int(datetime.now(timezone.utc).timestamp())
-    current = db_get_expiry(user_id)
-    base = current if (current and current > now) else now
-    new_exp = base + delta_days * 24 * 60 * 60
-
+def db_set_or_extend(user_id: int, code_upper: str, delta_days: int = 30) -> int:
+    """Если активна — продлеваем от текущего expires_at, иначе — от now. Возвращает новый expires_at."""
+    now = _now_unix()
     with sqlite3.connect(CFG.db_path) as con:
-        if current is None:
+        cur = con.execute("SELECT expires_at FROM clients WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+        if row:
+            current = int(row[0])
+            base = current if current > now else now
+            new_exp = base + delta_days * 86400
             con.execute(
-                "INSERT INTO users (user_id, expires_at, created_at) VALUES (?, ?, ?)",
-                (user_id, new_exp, now)
+                "UPDATE clients SET code = ?, expires_at = ?, updated_at = ? WHERE user_id = ?",
+                (code_upper, new_exp, now, user_id)
             )
         else:
+            new_exp = now + delta_days * 86400
             con.execute(
-                "UPDATE users SET expires_at = ? WHERE user_id = ?",
-                (new_exp, user_id)
+                "INSERT INTO clients (user_id, code, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, code_upper, new_exp, now, now)
             )
         con.commit()
-    return new_exp
+        return new_exp
+
+def db_list_clients(limit: int = 50, offset: int = 0):
+    with sqlite3.connect(CFG.db_path) as con:
+        cur = con.execute("""
+            SELECT user_id, code, expires_at
+            FROM clients
+            ORDER BY expires_at ASC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        return [(int(r[0]), str(r[1]), int(r[2])) for r in cur.fetchall()]
 
 # ---------- УТИЛИТЫ ----------
-def format_dt_utc(ts_unix: int) -> str:
-    dt = datetime.fromtimestamp(ts_unix, tz=timezone.utc)
-    # Выводим локально понятную дату (UTC метка + ISO)
-    return dt.strftime("%Y-%m-%d %H:%M UTC")
+def fmt_dt(ts: int) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-def days_left(ts_unix: int) -> int:
-    now = int(datetime.now(timezone.utc).timestamp())
-    if ts_unix <= now:
-        return 0
-    return (ts_unix - now) // (24 * 60 * 60)
+def days_left(ts: int) -> int:
+    n = _now_unix()
+    return max(0, (ts - n) // 86400)
 
-def main_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💳 Оплатить доступ", callback_data="buy")]]
-    )
+def link_for_code(code: str) -> Optional[str]:
+    base = CFG.public_base.rstrip("/") if CFG.public_base else ""
+    if not base:
+        return None
+    return f"{base}/{code}"
 
-def after_buy_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("📤 Загрузить чек", callback_data="upload")]]
-    )
+def chunk_rows(rows, n):
+    buf = []
+    for r in rows:
+        buf.append(r)
+        if len(buf) == n:
+            yield buf
+            buf = []
+    if buf:
+        yield buf
 
-def approve_kb(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve:{user_id}"),
-            InlineKeyboardButton("❌ Отклонить", callback_data=f"reject:{user_id}"),
-        ]]
-    )
-
-# ---------- ХЕНДЛЕРЫ ----------
-async def start(update: Update, _: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Привет!\n\n"
-        "Здесь ты оформляешь доступ. Нажми кнопку ниже, оплати и пришли чек — мы быстро проверим.\n\n"
-        "Команда /status — покажет, до какой даты активен доступ.",
-        reply_markup=main_menu_kb(),
-    )
-
-async def ping(update: Update, _: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("pong")
-
-async def status_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    exp = db_get_expiry(user.id)
-    if not exp:
-        await update.message.reply_text("🔒 Доступ не активирован. Оформи оплату и пришли чек. /buy")
+# ---------- TELEGRAM ХЕНДЛЕРЫ ----------
+async def cmd_start(update: Update, _: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user:
         return
+    uid = update.effective_user.id
+    rec = db_get_client(uid)
+
+    if not rec:
+        await update.message.reply_text(
+            "🔒 Ты ещё не зарегистрирован.\n"
+            "Напиши админу, чтобы он добавил тебя (регистрация через /api/register-code)."
+        )
+        return
+
+    _, code, exp = rec
     left = days_left(exp)
-    await update.message.reply_text(
-        f"🔐 Доступ активен до: *{format_dt_utc(exp)}*  \n"
-        f"Осталось: *{left}* дн.",
-        parse_mode="Markdown"
-    )
-
-async def buy_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
-    text = (
-        f"💳 *Оплата доступа*\n\n"
-        f"Сумма: *{PAY_AMOUNT_RUB} ₽*\n"
-        f"Карта: *{PAY_CARD}*\n\n"
-        f"После оплаты нажми «📤 Загрузить чек» и прикрепи фото/скрин.\n"
-        f"_Подтвердим вручную. Для проверки статуса: /status_"
-    )
-    parse = "Markdown"
-    if is_callback and update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.message.reply_text(text, parse_mode=parse, reply_markup=after_buy_kb())
+    link = link_for_code(code)
+    if link:
+        await update.message.reply_text(
+            "✅ У тебя активирован доступ.\n\n"
+            f"🔗 Ссылка: {link}\n"
+            f"🆔 Код: {code}\n"
+            f"⏳ Действует до: *{fmt_dt(exp)}*  (осталось *{left}* дн.)",
+            parse_mode="Markdown"
+        )
     else:
-        await update.message.reply_text(text, parse_mode=parse, reply_markup=after_buy_kb())
+        await update.message.reply_text(
+            "✅ У тебя активирован доступ.\n\n"
+            f"🆔 Код: *{code}*\n"
+            f"⏳ Действует до: *{fmt_dt(exp)}*  (осталось *{left}* дн.)\n\n"
+            "_(PUBLIC_BASE не задан — ссылку собрать нельзя)_",
+            parse_mode="Markdown"
+        )
 
-async def buy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await buy_flow(update, context, is_callback=False)
+async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user:
+        return
+    uid = update.effective_user.id
+    rec = db_get_client(uid)
+    if not rec:
+        await update.message.reply_text("🔒 Нет активной подписки. Обратитесь к админу.")
+        return
+    _, code, exp = rec
+    left = days_left(exp)
+    link = link_for_code(code)
+    txt = [
+        "🔐 *Статус доступа*",
+        f"Код: *{code}*",
+        f"До: *{fmt_dt(exp)}*",
+        f"Осталось: *{left}* дн."
+    ]
+    if link:
+        txt.insert(1, f"Ссылка: {link}")
+    await update.message.reply_text("\n".join(txt), parse_mode="Markdown")
 
-async def on_upload_click(update: Update, _: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    await q.message.reply_text(
-        "📤 Пришли сюда *фото* или *файл* с чеком. Мы проверим и ответим.",
-        parse_mode="Markdown",
-        reply_markup=ReplyKeyboardRemove()
-    )
+async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user:
+        return
+    uid = update.effective_user.id
+    if uid != CFG.admin_tid:
+        await update.message.reply_text("⛔ Нет прав.")
+        return
 
-async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ловим любой чек (фото/док) и пересылаем админу с кнопками."""
-    user = update.effective_user
-    msg: Message = update.message
-    caption = f"🧾 Чек от @{user.username or 'user'} (ID {user.id}). Проверить?"
-    kb = approve_kb(user.id)
+    # Пагинация: /admin <page>, страница с 1
+    page = 1
+    if context.args and len(context.args) >= 1:
+        try:
+            page = max(1, int(context.args[0]))
+        except Exception:
+            page = 1
 
+    PAGE_SIZE = 30
+    offset = (page - 1) * PAGE_SIZE
+    rows = db_list_clients(limit=PAGE_SIZE, offset=offset)
+
+    if not rows:
+        await update.message.reply_text(f"Пусто (страница {page}).")
+        return
+
+    lines = [f"📋 Зарегистрированные (стр. {page}) — ближайшие сверху:"]
+    for user_id, code, exp in rows:
+        left = days_left(exp)
+        lines.append(f"• {code} — user_id {user_id} — до {fmt_dt(exp)} — осталось {left} дн.")
+    await update.message.reply_text("\n".join(lines))
+
+# ---------- HTTP API (aiohttp) ----------
+# Лёгкий сервер для регистрации / статуса под твою curl-схему
+async def _auth_ok(request: web.Request) -> bool:
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return False
+    token = auth.split(" ", 1)[1].strip()
+    return token == CFG.admin_api_secret
+
+async def api_register_code(request: web.Request):
+    if not await _auth_ok(request):
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
     try:
-        if msg.photo:
-            # Берём самое большое фото
-            await context.bot.send_photo(
-                chat_id=CFG.admin_tid,
-                photo=msg.photo[-1].file_id,
-                caption=caption,
-                reply_markup=kb
-            )
-        elif msg.document:
-            await context.bot.send_document(
-                chat_id=CFG.admin_tid,
-                document=msg.document.file_id,
-                caption=caption,
-                reply_markup=kb
-            )
-        else:
-            # На всякий — просто форвард
-            await context.bot.forward_message(
-                chat_id=CFG.admin_tid,
-                from_chat_id=msg.chat_id,
-                message_id=msg.message_id
-            )
-            await context.bot.send_message(chat_id=CFG.admin_tid, text=caption, reply_markup=kb)
-        await msg.reply_text("🧾 Чек получен. Ждём подтверждения администратора. /status")
+        data = await request.json()
+        code = str(data.get("code", "")).strip()
+        chat_id_raw = str(data.get("chatId", "")).strip()
+        days = int(data.get("days", 30))
+        if not code or not chat_id_raw:
+            return web.json_response({"ok": False, "error": "code/chatId required"}, status=400)
+        # chatId может прийти строкой — приведём к int
+        try:
+            user_id = int(chat_id_raw)
+        except Exception:
+            return web.json_response({"ok": False, "error": "chatId must be integer"}, status=400)
+
+        code_up = code.upper()
+        new_exp = db_set_or_extend(user_id, code_up, delta_days=days)
+        return web.json_response({"ok": True, "code": code_up, "chatId": str(user_id), "expires_at": new_exp})
     except Exception as e:
-        log.exception("Ошибка пересылки чека админу: %s", e)
-        await msg.reply_text("⚠️ Не удалось отправить чек админу. Попробуй ещё раз /buy")
+        log.exception("api_register_code error: %s", e)
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
 
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    data = q.data or ""
-    uid = q.from_user.id
+async def api_status(request: web.Request):
+    if not await _auth_ok(request):
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    chat_id_raw = request.query.get("chatId", "") or ""
+    if not chat_id_raw:
+        return web.json_response({"ok": False, "error": "chatId required"}, status=400)
+    try:
+        user_id = int(chat_id_raw)
+    except Exception:
+        return web.json_response({"ok": False, "error": "chatId must be integer"}, status=400)
 
-    # Кнопка "Оплатить доступ"
-    if data == "buy":
-        await buy_flow(update, context, is_callback=True)
-        return
+    rec = db_get_client(user_id)
+    if not rec:
+        return web.json_response({"ok": True, "exists": False, "chatId": str(user_id)})
+    _, code, exp = rec
+    return web.json_response({
+        "ok": True,
+        "exists": True,
+        "chatId": str(user_id),
+        "code": code,
+        "expires_at": exp,
+        "days_left": days_left(exp),
+    })
 
-    if data == "upload":
-        await on_upload_click(update, context)
-        return
+def start_http_server_in_thread():
+    """Поднимаем aiohttp-сервер в отдельном потоке, чтобы не мешал run_polling()."""
+    app = web.Application()
+    app.add_routes([
+        web.post("/api/register-code", api_register_code),
+        web.get("/api/status", api_status),
+        web.get("/health", lambda _: web.json_response({"ok": True, "mode": os.getenv("BOT_MODE", "polling")})),
+    ])
 
-    # Подтверждение/отклонение — только у админа
-    if (data.startswith("approve:") or data.startswith("reject:")) and uid != CFG.admin_tid:
-        await q.answer("Нет прав.", show_alert=True)
-        return
+    def _run():
+        # web.run_app блокирующий — поэтому в отдельном потоке
+        web.run_app(app, host="0.0.0.0", port=CFG.port, handle_signals=False)
 
-    if data.startswith("approve:"):
-        await q.answer()
-        target_id_str = data.split(":", 1)[1]
-        if not target_id_str.isdigit():
-            await q.message.reply_text("❌ Некорректный user_id")
-            return
-        target_id = int(target_id_str)
-
-        try:
-            new_exp = db_set_or_extend(target_id, delta_days=30)
-        except Exception as e:
-            log.exception("DB set/extend failed: %s", e)
-            await q.message.reply_text(f"⚠️ Не удалось активировать доступ: {e}")
-            return
-
-        # Сообщаем пользователю
-        try:
-            left = days_left(new_exp)
-            await context.bot.send_message(
-                chat_id=target_id,
-                text=(
-                    "✅ Оплата подтверждена!\n\n"
-                    f"🔐 Доступ активен до: *{format_dt_utc(new_exp)}*\n"
-                    f"Осталось: *{left}* дн.\n\n"
-                    "Проверить статус: /status"
-                ),
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            log.warning("notify user failed: %s", e)
-
-        # Отметка в админском сообщении + подсказка
-        try:
-            note = f"\n\n✅ Подтверждено. Доступ до {format_dt_utc(new_exp)}"
-            if q.message and q.message.caption:
-                await q.edit_message_caption((q.message.caption or "") + note)
-            else:
-                await q.message.reply_text("✅ Подтверждено." + note)
-            await context.bot.send_message(
-                chat_id=CFG.admin_tid,
-                text=(
-                    f"👤 user_id *{target_id}* активирован/продлён до *{format_dt_utc(new_exp)}*.\n"
-                    "Без ссылок: пользователь сам их получит и использует в нужном месте."
-                ),
-                parse_mode="Markdown"
-            )
-        except Exception:
-            pass
-        return
-
-    if data.startswith("reject:"):
-        await q.answer()
-        target_id_str = data.split(":", 1)[1]
-        if not target_id_str.isdigit():
-            await q.message.reply_text("❌ Некорректный user_id")
-            return
-        target_id = int(target_id_str)
-
-        try:
-            await context.bot.send_message(chat_id=target_id, text="❌ Чек отклонён. Попробуй ещё раз. /buy")
-        except Exception:
-            pass
-        try:
-            if q.message and q.message.caption:
-                await q.edit_message_caption((q.message.caption or "") + "\n\n❌ Отклонено.")
-            else:
-                await q.message.reply_text("❌ Отклонено.")
-        except Exception:
-            pass
-        return
-
-# ---------- HEALTH (для webhook-режима при желании) ----------
-async def _health(_: web.Request):
-    return web.json_response({"ok": True, "mode": os.getenv("BOT_MODE", "polling")})
+    th = threading.Thread(target=_run, daemon=True)
+    th.start()
+    log.info(f"[http] started on 0.0.0.0:{CFG.port}")
 
 # ---------- MAIN ----------
-def make_application() -> Application:
+def make_telegram_app() -> Application:
     db_init()
-
     app = Application.builder().token(CFG.token).build()
 
-    # Команды
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("buy", buy_cmd))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CommandHandler("status", status_cmd))
-
-    # Клики по инлайн-кнопкам
-    app.add_handler(CallbackQueryHandler(callback_handler))
-
-    # Чеки: фото/док
-    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_receipt))
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("admin", cmd_admin))
 
     return app
 
 def main():
-    application = make_application()
+    # HTTP API
+    start_http_server_in_thread()
 
+    # Telegram
+    tg = make_telegram_app()
     if CFG.mode == "webhook":
-        # Webhook режим (нужен PUBLIC_URL)
-        if not CFG.public_url:
-            raise RuntimeError("PUBLIC_URL (или RENDER_EXTERNAL_URL) обязателен для webhook")
-        path_secret = secrets.token_hex(16)
-        hook_path = f"/tg/webhook/{path_secret}"
-        log.info(f"[webhook] {CFG.public_url}{hook_path}  port={CFG.port}")
-        application.run_webhook(
+        # Webhook-режим (если захочешь) — адресом будет PUBLIC_BASE + секретный путь
+        if not CFG.public_base:
+            raise RuntimeError("PUBLIC_BASE обязателен для webhook")
+        secret_path = f"/tg/webhook/{secrets.token_hex(16)}"
+        url = f"{CFG.public_base.rstrip('/')}{secret_path}"
+        log.info(f"[webhook] {url}")
+        tg.run_webhook(
             listen="0.0.0.0",
-            port=CFG.port,
-            url_path=hook_path,
-            webhook_url=f"{CFG.public_url}{hook_path}",
-            allowed_updates=None,
+            port=CFG.port,              # тот же порт: aiohttp уже слушает; чтобы не конфликтовало — для webhook лучше отдельный процесс
+            url_path=secret_path,
+            webhook_url=url,
             drop_pending_updates=True,
+            allowed_updates=None,
         )
-        # Если хочешь полноценный /health — нужно поднимать aiohttp-сервер отдельно.
     else:
-        # Простой и надёжный режим для Render — polling
         log.info("[polling] bot started")
-        application.run_polling(allowed_updates=None)
+        tg.run_polling(allowed_updates=None)
 
 if __name__ == "__main__":
     main()
