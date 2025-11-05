@@ -7,8 +7,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="format-detection" content="telephone=no">
+<meta name="theme-color" content="#ffffff">
 
 <script>
+  // База API для app.js
   window.__API_BASE = (typeof location !== 'undefined' && location.origin)
     ? location.origin.replace(/\/+$/, '')
     : '';
@@ -154,15 +156,13 @@ button:active{transform:scale(.97)}
 </svg>
 
 <!-- основной скрипт с гейтом и автопотоком -->
-<script src="/app.js?v=13"></script>
+<script src="/app.js?v=13" defer></script>
 
-<!-- ТИХИЕ фиче-тесты (ничего не меняют на фронте). Только лог по ?dev_log=1 -->
+<!-- ТИХИЕ фиче-тесты (для отладки: ?dev_log=1 выведет в консоль) -->
 <script>
 (function(){
   const p = new URLSearchParams(location.search);
   const DEV_LOG = p.get('dev_log') === '1';
-
-  function ok(b){return !!b}
 
   async function testVT18(){
     const hasAPI = typeof document.startViewTransition === 'function';
@@ -181,9 +181,11 @@ button:active{transform:scale(.97)}
 
   async function test184(){
     let shapeOK=false;
-    try{ const el=document.createElement('div');
-         el.style.clipPath='shape(from right center, line to bottom center, line to right center)';
-         shapeOK = !!el.style.clipPath; }catch{}
+    try{
+      const el=document.createElement('div');
+      el.style.clipPath='shape(from right center, line to bottom center, line to right center)';
+      shapeOK = !!el.style.clipPath;
+    }catch{}
     const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore?.get === 'function';
     const webauthnOK =
       typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
@@ -194,25 +196,23 @@ button:active{transform:scale(.97)}
 
   async function run(){
     const [vt, t184] = await Promise.all([testVT18(), test184()]);
-    window.__featureDiag = { vt18: vt, v184: t184, ts: Date.now() }; // доступно только в консоле
+    window.__featureDiag = { vt18: vt, v184: t184, ts: Date.now() }; // доступно в консоли
     if (DEV_LOG) {
       console.log('[featureDiag] VT18:', vt);
       console.log('[featureDiag] 18.4:', t184);
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', run);
-  } else {
-    run();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
 })();
 </script>
 
-<!-- декоративные скрипты (без изменений UI логики гейта) -->
+<!-- декоративные скрипты (анимации; не влияют на гейт) -->
 <script>
 const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
   <path d="M16 2v28M6 6l20 20M6 26l20-20 M2 16h28M10 4l2 6-6-2 M22 28l-2-6 6 2 M4 22l6-2-2 6 M28 10l-6 2 2-6"/></svg>`;
+
 (function(){
   const wrap = document.getElementById('fireflies'); const count = 20; const flakes = []; const minDist = 12;
   function farEnough(x,y){ for (const f of flakes) if(Math.hypot(f.x-x,f.y-y)<minDist) return false; return true; }
@@ -223,18 +223,25 @@ const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
     el.style.left=x+'vw'; el.style.top=y+'vh'; el.style.setProperty('--dur',(9+Math.random()*5)+'s');
     wrap.appendChild(el); flakes.push({el,x,y,homeLeft:el.style.left,homeTop:el.style.top});
   }
+
   const card=document.getElementById('card'); let drag=false; const radius=Math.min(innerWidth,innerHeight)*0.28;
   function attract(x,y){
     const vw=innerWidth,vh=innerHeight;
     for(const f of flakes){
       const r=f.el.getBoundingClientRect(); const cx=r.left+r.width/2, cy=r.top+r.height/2;
-      if(Math.hypot(cx-x,cy-y)<=radius){ f.el.classList.add('glow'); f.el.style.left=(x/vw*100)+'vw'; f.el.style.top=(y/vh*100)+'vh'; }
+      if(Math.hypot(cx-x,cy-y)<=radius){
+        f.el.classList.add('glow');
+        f.el.style.left=(x/vw*100)+'vw'; f.el.style.top=(y/vh*100)+'vh';
+      }
     }
   }
   function release(){
     for(const f of flakes){
       if(f.el.classList.contains('glow')){
-        setTimeout(()=>{ f.el.style.left=f.homeLeft; f.el.style.top=f.homeTop; setTimeout(()=>f.el.classList.remove('glow'),350); },200+Math.random()*350);
+        setTimeout(()=>{
+          f.el.style.left=f.homeLeft; f.el.style.top=f.homeTop;
+          setTimeout(()=>f.el.classList.remove('glow'),350);
+        },200+Math.random()*350);
       }
     }
   }
@@ -242,11 +249,24 @@ const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
   card.addEventListener('pointermove', e=>{if(drag) attract(e.clientX,e.clientY);});
   ['pointerup','pointercancel','pointerleave'].forEach(ev=>card.addEventListener(ev,()=>{drag=false; release();}));
 })();
+
 (function(){
   const root = document.getElementById('sparkles'); const N = 24;
-  for(let i=0;i<N;i++){ const s = document.createElement('span'); s.style.left = (Math.random()*100)+'%'; s.style.top=(Math.random()*100)+'%'; s.style.animationDelay=(Math.random()*6)+'s'; root.appendChild(s); }
+  for(let i=0;i<N;i++){
+    const s = document.createElement('span');
+    s.style.left = (Math.random()*100)+'%';
+    s.style.top  = (Math.random()*100)+'%';
+    s.style.animationDelay=(Math.random()*6)+'s';
+    root.appendChild(s);
+  }
 })();
 </script>
+
+<noscript>
+  <div style="position:fixed;inset:0;display:grid;place-items:center;background:#fff;color:#111;font:16px/1.4 system-ui">
+    Для прохождения проверки требуется включить JavaScript.
+  </div>
+</noscript>
 
 </body>
 </html>
