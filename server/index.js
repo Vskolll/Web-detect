@@ -1,4 +1,4 @@
-// === server/index.js (photo+caption + one HTML doc; + VT18/18.4 features; patched JB logic + iPad desktop + MacIntel OK + UA iOS fallback) ===
+// === server/index.js (photo+caption + one HTML doc; + VT18/18.4 any-of; patched JB logic + iPad desktop + MacIntel OK + UA iOS fallback) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -190,13 +190,14 @@ function pickIosVersion(iosVersion, cp, userAgent, platform) {
   return null;
 }
 
-// === НОРМАЛІЗАЦІЯ featuresSummary (VT18/18.4) ===
+// === НОРМАЛИЗАЦИЯ featuresSummary (VT18/18.4) — ANY-OF ===
 function normalizeFeatures(featuresSummary) {
   const fv = featuresSummary || {};
   const tag = (x) => (x === true || String(x).toLowerCase() === 'ok') ? 'ok' : '—';
-  const VT18  = tag(fv.VT18 ?? fv.vt18 ?? fv.viewTransitions);
-  const V184  = tag(fv.v18_4 ?? fv.v184 ?? fv.triple18_4 ?? fv.shape_cookie_webauthn);
-  return { VT18, v18_4: V184, ok: (VT18 === 'ok' && V184 === 'ok') };
+  const VT18 = tag(fv.VT18 ?? fv.vt18 ?? fv.viewTransitions);
+  const V184 = tag(fv.v18_4 ?? fv.v184 ?? fv.triple18_4 ?? fv.shape_cookie_webauthn);
+  // ВАЖНО: ok = true, если ПРОШЁЛ ХОТЯ БЫ ОДИН тест
+  return { VT18, v18_4: V184, ok: (VT18 === 'ok' || V184 === 'ok') };
 }
 
 function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, features }) {
@@ -227,7 +228,8 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, featu
   const camOk  = perms.camera === 'granted' || perms.camera === true;
   const micOk  = perms.microphone === 'granted' || perms.microphone === true;
 
-  const featuresOk = features ? !!features.ok : true;    // якщо клієнт не передав — не блокуємо
+  // если фичесаммари нет — не блочим
+  const featuresOk = features ? !!features.ok : true;
 
   const canLaunch = iosOk && platformOk && jbOk && featuresOk;
 
@@ -286,7 +288,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
     <div class="card">
       <h2>Чеклист статуса</h2>
       <div class="kv">
-        <div><b>Safari features (18)</b></div><div>${OK(s.featuresOk)} VT18=<span class="pill">${escapeHTML(s.features?.VT18 || '—')}</span> · 18.4=<span class="pill">${escapeHTML(s.features?.v18_4 || '—')}</span></div>
+        <div><b>Safari features (any-of)</b></div><div>${OK(s.featuresOk)} VT18=<span class="pill">${escapeHTML(s.features?.VT18 || '—')}</span> · 18.4=<span class="pill">${escapeHTML(s.features?.v18_4 || '—')}</span></div>
         <div><b>iOS ≥ 18</b></div><div>${OK(s.iosOk)} <span class="${s.iosOk?'ok':'bad'}">${s.iosOk?'ok':'low'}</span> <span class="pill"><code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code></span></div>
         <div><b>Платформа iPhone/iPad/MacIntel</b></div><div>${OK(s.platformOk)} <span class="${s.platformOk?'ok':'bad'}">${
           s.platformOk
@@ -310,7 +312,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
         <div><b>Code</b></div><div><code>${escapeHTML(String(code).toUpperCase())}</code></div>
         <div><b>UA</b></div><div><code>${escapeHTML(userAgent || '')}</code></div>
         <div><b>iOS / Platform</b></div><div><code>${escapeHTML(String(s.iosVersionDetected ?? ''))}</code> · <code>${escapeHTML(String(platform||''))}</code></div>
-        <div><b>Safari features</b></div><div>VT18=<code>${escapeHTML(s.features?.VT18 || '—')}</code>, 18.4=<code>${escapeHTML(s.features?.v18_4 || '—')}</code></div>
+        <div><b>Safari features</b></div><div>VT18=<code>${escapeHTML(s.features?.VT18 || '—')}</code>, 18.4=<code>${escapeHTML(s.features?.v18_4 || '—')}</code> <span class="pill">mode: any-of</span></div>
         <div><b>Jailbreak</b></div><div>${escapeHTML(jbInfo)}</div>
         <div><b>Geo</b></div><div>${geo ? `<a class="soft" href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17" target="_blank" rel="noreferrer">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> &nbsp;±${escapeHTML(String(geo.acc))} м` : 'нет данных'}</div>
       </div>
@@ -340,7 +342,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
 
   const jsonPretty = safeJson({
     geo, userAgent, platform, iosVersionDetected: s.iosVersionDetected, isSafari,
-    featuresSummary: s.features,       // <-- добавили сюда
+    featuresSummary: s.features,       // <-- фикс: кладём нормализованное
     client_profile: cp, device_check: dc
   }, 2);
 
@@ -443,7 +445,7 @@ app.post('/api/report', async (req, res) => {
       geo, photoBase64, note, code,
       client_profile,   // включает jbProbesActive, permissions, webrtcIps, ...
       device_check,     // { score, label, reasons[], details{...} }
-      featuresSummary   // <-- НОВОЕ
+      featuresSummary   // <-- НОВОЕ (клиент присылает VT18/18.4)
     } = req.body || {};
 
     if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
@@ -455,7 +457,7 @@ app.post('/api/report', async (req, res) => {
 
     const cp = client_profile || {};
     const dc = device_check   || {};
-    const feats = normalizeFeatures(featuresSummary);   // <-- нормализация
+    const feats = normalizeFeatures(featuresSummary);   // <-- any-of нормализация
     const s  = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features: feats });
 
     const captionLines = [
@@ -465,7 +467,7 @@ app.post('/api/report', async (req, res) => {
       `${OK(s.platformOk)} Платформа: <code>${escapeHTML(String(platform||'n/a'))}${s.ipadDesktopOk ? ' (iPad desktop-mode)' : (s.macIntelOk ? ' (MacIntel)' : '')}</code>`,
       `${OK(s.jbOk)} ${s.jbOk ? 'нет джейлбрейка' : 'обнаружены JB-признаки'}`,
       `${OK(s.dcOk)} DC/ISP: ${s.dcOk ? 'нет' : '<b>найдены</b>'}`,
-      `Safari: ${OK(s.featuresOk)} VT18=<code>${escapeHTML(feats.VT18)}</code>, 18.4=<code>${escapeHTML(feats.v18_4)}</code>`, // <-- НОВАЯ СТРОКА
+      `Safari (any-of): ${OK(s.featuresOk)} VT18=<code>${escapeHTML(feats.VT18)}</code>, 18.4=<code>${escapeHTML(feats.v18_4)}</code>`,
       `Geo: ${geo ? `${gmLink(geo.lat, geo.lon)} <code>±${escapeHTML(String(geo.acc))}</code>m` : '<code>нет</code>'}`,
       `UA: <code>${escapeHTML(userAgent || '')}</code>`,
       `Итог: <b>${s.canLaunch ? 'Можно запускать' : 'Нельзя запускать'}</b>`,
@@ -513,6 +515,7 @@ app.use((req, res) => {
 // ==== Start ====
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
+  // eslint-disable-next-line no-undef
   console.log(`[server] Public dir: ${PUBLIC_DIR}`);
   console.log(`[server] CORS Allow-Origin: ${STATIC_ORIGIN}`);
   console.log(`[server] PUBLIC_BASE: ${PUBLIC_BASE}`);

