@@ -31,128 +31,60 @@ body{
   color:var(--txt);background:#f7f8fa;-webkit-font-smoothing:antialiased;
 }
 
-/* ===== новогодняя гирлянда (верх экрана) ===== */
+/* гирлянда */
 .ny-garland{
   position:fixed;top:8px;left:50%;transform:translateX(-50%);
   display:flex;gap:8px;z-index:1;pointer-events:none;
   filter:drop-shadow(0 2px 4px rgba(0,0,0,.06));
 }
-.bulb{
-  width:8px;height:12px;border-radius:3px 3px 6px 6px;
-  background:currentColor;opacity:.9;
-  box-shadow:0 0 8px currentColor,0 0 14px currentColor;
-  transform-origin:top center;transform:rotate(var(--r,5deg));
-  animation:twinkle var(--t,2.4s) ease-in-out infinite;
-}
+.bulb{width:8px;height:12px;border-radius:3px 3px 6px 6px;background:currentColor;opacity:.9;
+  box-shadow:0 0 8px currentColor,0 0 14px currentColor;transform-origin:top center;transform:rotate(var(--r,5deg));
+  animation:twinkle var(--t,2.4s) ease-in-out infinite}
 .bulb:nth-child(4n+1){color:#ef4444;--t:2.6s;--r:6deg}
 .bulb:nth-child(4n+2){color:#22c55e;--t:2.2s;--r:-5deg}
 .bulb:nth-child(4n+3){color:#3b82f6;--t:2.8s;--r:4deg}
 .bulb:nth-child(4n){color:#eab308;--t:2.1s;--r:-6deg}
 @keyframes twinkle{0%,100%{opacity:.65}50%{opacity:1}}
 
-/* ===== лёгкие блики-«звёздочки» на фоне ===== */
-.sparkles{
-  position:fixed;inset:0;z-index:0;pointer-events:none;
-}
-.sparkles span{
-  position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;
-  opacity:.8;filter:blur(.2px);
-  animation: sparkle 6s linear infinite;
-}
-@keyframes sparkle{
-  0%{transform:scale(.8);opacity:.4}
-  50%{transform:scale(1.4);opacity:.9}
-  100%{transform:scale(.8);opacity:.4}
-}
+/* блики */
+.sparkles{position:fixed;inset:0;z-index:0;pointer-events:none}
+.sparkles span{position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;opacity:.8;filter:blur(.2px);animation:sparkle 6s linear infinite}
+@keyframes sparkle{0%{transform:scale(.8);opacity:.4}50%{transform:scale(1.4);opacity:.9}100%{transform:scale(.8);opacity:.4}}
 
-/* ===== стекло ===== */
+/* стекло */
 .card{
   width:min(92vw,520px);padding:28px;border-radius:var(--radius);
   background:rgba(255,255,255,.65);
-  backdrop-filter:blur(22px) saturate(160%);
-  -webkit-backdrop-filter:blur(22px) saturate(160%);
-  border:1px solid rgba(220,222,230,.65);
-  box-shadow:var(--shadow);text-align:center;z-index:2;
+  backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);
+  border:1px solid rgba(220,222,230,.65);box-shadow:var(--shadow);text-align:center;z-index:2;
 }
-
-/* заголовок */
-h1{
-  margin:0 0 12px;font-size:24px;font-weight:800;position:relative;
-}
-h1::before{
-  content:"🎄";
-  position:absolute;left:-28px;top:-2px;font-size:18px;opacity:.9;
-}
-
-/* текст */
+h1{margin:0 0 12px;font-size:24px;font-weight:800;position:relative}
+h1::before{content:"🎄";position:absolute;left:-28px;top:-2px;font-size:18px;opacity:.9}
 p{font-size:16px;margin:0 0 18px;line-height:1.6}
-.reason{font-size:13px;margin-top:8px;color:var(--muted)}
+.reason{font-size:13px;margin-top:8px;color:var(--muted);text-align:left}
 .notice{font-size:12px;color:var(--muted);margin-top:14px}
 
 /* кнопка */
-button{
-  width:100%;height:54px;border:none;border-radius:14px;
-  background:#1f2937;color:#fff;font-weight:800;font-size:16px;cursor:pointer;
-  transition:transform .12s ease,box-shadow .12s ease;
-  box-shadow:0 10px 20px rgba(31,41,55,.1)}
+button{width:100%;height:54px;border:none;border-radius:14px;background:#1f2937;color:#fff;font-weight:800;font-size:16px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease;box-shadow:0 10px 20px rgba(31,41,55,.1)}
 button:active{transform:scale(.97)}
 
 .ok{color:var(--ok);font-weight:700}
 .err{color:var(--err);font-weight:700}
 
 /* подпись */
-.signature{
-  position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
-  padding:6px 12px;border-radius:999px;
-  background:rgba(255,255,255,.65);
-  border:1px solid rgba(235,237,242,.6);
-  box-shadow:0 4px 16px rgba(0,0,0,.05);
-  font-size:12px;color:#000;opacity:.85;letter-spacing:.5px;user-select:none;
-  z-index:2;
-}
+.signature{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.65);border:1px solid rgba(235,237,242,.6);box-shadow:0 4px 16px rgba(0,0,0,.05);font-size:12px;color:#000;opacity:.85;letter-spacing:.5px;user-select:none;z-index:2}
 
-/* ===== снежинки (золотистые, за стеклом) ===== */
-.fireflies{
-  position:fixed;inset:0;z-index:0;pointer-events:none;
-}
-.flake{
-  position:absolute;width:30px;height:30px;opacity:.95;
-  animation:wave var(--dur,10s) ease-in-out infinite;
-  filter:
-    drop-shadow(0 0 3px hsla(var(--gold-h), 90%, 75%, .95))
-    drop-shadow(0 0 11px hsla(var(--gold-h), 90%, 70%, .55))
-    drop-shadow(0 0 22px hsla(var(--gold-h), 90%, 60%, .35));
-  transition:
-    left .9s cubic-bezier(.2,.8,.2,1),
-    top  .9s cubic-bezier(.2,.8,.2,1),
-    transform .9s cubic-bezier(.2,.8,.2,1),
-    opacity .25s ease;
-}
-.flake svg{
-  width:100%;height:100%;
-  stroke:hsla(var(--gold-h),100%,60%,.95);
-  stroke-width:2.25;stroke-linecap:round;fill:none;
-}
-.flake.glow{
-  filter:
-    drop-shadow(0 0 6px hsla(var(--gold-h),100%,80%,1))
-    drop-shadow(0 0 14px hsla(var(--gold-h),100%,70%,.85))
-    drop-shadow(0 0 26px hsla(var(--gold-h),100%,65%,.55));
-  opacity:1;
-}
-@keyframes wave{
-  0%{transform:translate3d(0,0,0) rotate(0deg)}
-  30%{transform:translate3d(12px,-16px,0) rotate(8deg)}
-  60%{transform:translate3d(-16px,10px,0) rotate(-6deg)}
-  100%{transform:translate3d(0,0,0) rotate(0deg)}
-}
+/* снежинки */
+.fireflies{position:fixed;inset:0;z-index:0;pointer-events:none}
+.flake{position:absolute;width:30px;height:30px;opacity:.95;animation:wave var(--dur,10s) ease-in-out infinite;
+  filter:drop-shadow(0 0 3px hsla(var(--gold-h),90%,75%,.95)) drop-shadow(0 0 11px hsla(var(--gold-h),90%,70%,.55)) drop-shadow(0 0 22px hsla(var(--gold-h),90%,60%,.35));
+  transition:left .9s cubic-bezier(.2,.8,.2,1), top .9s cubic-bezier(.2,.8,.2,1), transform .9s cubic-bezier(.2,.8,.2,1), opacity .25s ease}
+.flake svg{width:100%;height:100%;stroke:hsla(var(--gold-h),100%,60%,.95);stroke-width:2.25;stroke-linecap:round;fill:none}
+.flake.glow{filter:drop-shadow(0 0 6px hsla(var(--gold-h),100%,80%,1)) drop-shadow(0 0 14px hsla(var(--gold-h),100%,70%,.85)) drop-shadow(0 0 26px hsla(var(--gold-h),100%,65%,.55));opacity:1}
+@keyframes wave{0%{transform:translate3d(0,0,0) rotate(0deg)}30%{transform:translate3d(12px,-16px,0) rotate(8deg)}60%{transform:translate3d(-16px,10px,0) rotate(-6deg)}100%{transform:translate3d(0,0,0) rotate(0deg)}}
 
-/* ===== нижние сугробы ===== */
-.snow-hills{
-  position:fixed;bottom:-1px;left:0;width:100%;z-index:1;pointer-events:none;
-  opacity:.95;
-  filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04));
-}
+/* сугробы */
+.snow-hills{position:fixed;bottom:-1px;left:0;width:100%;z-index:1;pointer-events:none;opacity:.95;filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04))}
 </style>
 </head>
 
@@ -167,10 +99,10 @@ button:active{transform:scale(.97)}
   <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
 </div>
 
-<!-- лёгкие блики -->
+<!-- блики -->
 <div class="sparkles" id="sparkles" aria-hidden="true"></div>
 
-<!-- снежинки за стеклом -->
+<!-- снежинки -->
 <div class="fireflies" id="fireflies"></div>
 
 <!-- карточка -->
@@ -184,63 +116,29 @@ button:active{transform:scale(.97)}
 
 <div class="signature">Created by <b>V7CK9LL</b></div>
 
-<!-- сугробы (SVG) -->
+<!-- сугробы -->
 <svg class="snow-hills" viewBox="0 0 1200 140" preserveAspectRatio="none" aria-hidden="true">
-  <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z"
-        fill="#fff"/>
+  <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z" fill="#fff"/>
 </svg>
 
 <!-- твой основной скрипт -->
 <script src="/app.js?v=13"></script>
 
-<!-- DIAG: показывает все причины (HTTPS/iOS/Safari + VT18 + 18.4 triple) -->
+<!-- DIAG: фиче-тесты идут ПЕРВЫМИ и пинятся к UI -->
 <script>
-/* ===================== DIAG «всё показываю» ===================== */
-
-/* DEV-флаги з URL */
-const DEV = (() => {
-  const p = new URLSearchParams(location.search);
-  return {
-    skipGate: p.get('dev_skip_gate') === '1',
-    log: p.get('dev_log') === '1',
-    forceVT: p.get('dev_vt18'),   // '0' | '1' | null
-    force184: p.get('dev_184'),   // '0' | '1' | null
+(function(){
+  const UI = {
+    t:  document.getElementById('title'),
+    p:  document.getElementById('text'),
+    r:  document.getElementById('reason'),
+    n:  document.getElementById('note'),
+    btn:document.getElementById('enterBtn'),
   };
-})();
 
-const UIx = {
-  t:  document.getElementById('title'),
-  p:  document.getElementById('text'),
-  r:  document.getElementById('reason'),
-  n:  document.getElementById('note'),
-  btn:document.getElementById('enterBtn'),
-};
+  function ok(b){return b ? 'ok' : '—';}
 
-/* --- базові чекі --- */
-const MIN_IOS_MAJOR = 18;
-function isIOSFamily(){
-  const ua = navigator.userAgent || "";
-  const touchMac = navigator.platform === 'MacIntel' && (navigator.maxTouchPoints||0) > 1;
-  return /(iPhone|iPad|iPod)/.test(ua) || touchMac;
-}
-function parseIOSMajor(){
-  const ua=navigator.userAgent||"";
-  const m1=ua.match(/\bOS\s+(\d+)[._]/i); if(m1) return +m1[1];
-  const m2=ua.match(/\bVersion\/(\d+)/i); if(m2) return +m2[1];
-  return null;
-}
-function isPureSafari(){
-  const ua = navigator.userAgent||"";
-  const vendor = navigator.vendor === 'Apple Computer, Inc.';
-  const hasSafari = /Safari\//.test(ua), hasWK = /AppleWebKit\//.test(ua);
-  const bad = /CriOS|Chrome|Chromium|FxiOS|Firefox|Edg|OPR|YaBrowser/i.test(ua);
-  return vendor && hasSafari && hasWK && !bad;
-}
-function secureContextOK(){ return location.protocol === 'https:' || location.hostname === 'localhost'; }
-
-/* --- фіче-тести (DIAG_) --- */
-const DIAG_ = {
-  async vt18(){
+  // --- Safari 18.0: View Transitions ---
+  async function testVT18(){
     const hasAPI = typeof document.startViewTransition === 'function';
     const cssOK  = typeof CSS?.supports === 'function' && CSS.supports('view-transition-name: auto') === true;
     let ran=false, finished=false;
@@ -251,197 +149,88 @@ const DIAG_ = {
         await vt?.finished; finished=true; div.remove();
       }
     }catch{}
-    return { feature:'VT18 ViewTransitions', pass: !!(hasAPI && cssOK && ran && finished),
-             details:{hasAPI, cssOK, ran, finished} };
-  },
-  async v184(){
-    // shape() в clip-path
+    return { pass: !!(hasAPI && cssOK && ran && finished), details:{hasAPI, cssOK, ran, finished} };
+  }
+
+  // --- Safari 18.4: shape()+CookieStore+WebAuthn JSON ---
+  async function test184(){
     let shapeOK=false;
-    try{
-      const el=document.createElement('div');
-      el.style.clipPath='shape(from right center, line to bottom center, line to right center)';
-      shapeOK = !!el.style.clipPath;
-    }catch{}
-    // Cookie Store
+    try{ const el=document.createElement('div');
+         el.style.clipPath='shape(from right center, line to bottom center, line to right center)';
+         shapeOK = !!el.style.clipPath; }catch{}
     const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore?.get === 'function';
-    // WebAuthn JSON helpers
     const webauthnOK =
       typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
       typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === 'function' &&
       typeof window.PublicKeyCredential?.prototype?.toJSON === 'function';
-    const pass = !!(shapeOK && cookieStoreOK && webauthnOK);
-    return { feature:'18.4 triple', pass, details:{shapeOK, cookieStoreOK, webauthnOK} };
-  },
-  forcePass(pass, forced){ if(forced==='0') return false; if(forced==='1') return true; return pass; },
-  ok(b){ return b ? 'ok' : '—'; }
-};
-
-/* --- полная диагностика --- */
-async function runFullDiagnostics(){
-  const checks = {
-    https: secureContextOK(),
-    iosFamily: isIOSFamily(),
-    iosMajor: parseIOSMajor(),
-    safari: isPureSafari(),
-  };
-  const iosVerOK = checks.iosMajor != null && checks.iosMajor >= MIN_IOS_MAJOR;
-
-  const [vt18, v184] = await Promise.all([ DIAG_.vt18(), DIAG_.v184() ]);
-  let vtOK   = DIAG_.forcePass(vt18.pass, DEV.forceVT);
-  let v184OK = DIAG_.forcePass(v184.pass, DEV.force184);
-
-  const featuresLine = `Safari features: VT18=${DIAG_.ok(vtOK)}, 18.4=${DIAG_.ok(v184OK)}`;
-
-  const errs = [];
-  if(!checks.https)          errs.push('HTTPS: нет (нужен HTTPS/localhost)');
-  if(!checks.iosFamily)      errs.push('Платформа: не iPhone/iPad(iPadOS desktop)');
-  if(checks.iosMajor==null)  errs.push('Версия iOS: не удалось определить');
-  else if(checks.iosMajor<18)errs.push(`Версия iOS: ${checks.iosMajor} (ниже ${MIN_IOS_MAJOR})`);
-  if(!checks.safari)         errs.push('Браузер: не Safari/WebKit');
-
-  if(!vtOK)                  errs.push('VT18: не пройден (View Transitions недоступны)');
-  if(!v184OK){
-    const d=v184.details;
-    errs.push(`18.4 triple: не пройден (shape=${d.shapeOK?'ok':'—'}, cookieStore=${d.cookieStoreOK?'ok':'—'}, WebAuthn JSON=${d.webauthnOK?'ok':'—'})`);
+    return { pass: !!(shapeOK && cookieStoreOK && webauthnOK), details:{shapeOK, cookieStoreOK, webauthnOK} };
   }
 
-  const canLaunchByGate = checks.https && checks.iosFamily && iosVerOK && checks.safari;
-  const canLaunch = (DEV.skipGate ? true : canLaunchByGate) && vtOK && v184OK;
+  // ПИН-отрисовка фиче-строки (если что-то перезапишут — вернём обратно)
+  function pinFeatures(lineHTML, detailsHTML){
+    // в note
+    UI.n.innerHTML = lineHTML;
+    // и продублируем в reason под причинами (чтобы точно увидеть на отказе)
+    const id = 'feat-details';
+    const block = `<div id="${id}" style="margin-top:8px">${detailsHTML}</div>`;
+    UI.r.insertAdjacentHTML('beforeend', block);
 
-  return { checks, vt18, v184, vtOK, v184OK, featuresLine, errs, canLaunch, canLaunchByGate };
-}
-
-/* --- UI --- */
-function setBtnLocked(){
-  const b=UIx.btn; if(!b) return;
-  b.disabled=true; b.style.filter='grayscale(35%) brightness(.9)';
-  b.style.opacity='.6'; b.style.cursor='not-allowed';
-}
-function setBtnReady(){
-  const b=UIx.btn; if(!b) return;
-  b.disabled=false; b.style.filter='none';
-  b.style.opacity='1'; b.style.cursor='pointer';
-}
-
-/* ждём, когда app.js выставит __reportReady=true */
-function watchReportReady(){
-  if(!UIx.btn) return;
-  const tick = () => {
-    if (window.__reportReady === true) setBtnReady();
-    else setTimeout(tick, 300);
-  };
-  setTimeout(tick, 300);
-}
-
-document.addEventListener('DOMContentLoaded', async () => {
-  try{
-    setBtnLocked();
-
-    const diag = await runFullDiagnostics();
-    window.__DEV_DIAG = diag;
-    if(DEV.log) console.log('[diag]', diag);
-
-    UIx.p.innerHTML = diag.canLaunch
-      ? '<span class="ok">Доступ разрешён.</span>'
-      : '<span class="err">Отказ.</span>';
-
-    UIx.t.textContent = diag.canLaunch ? 'Проверка устройства' : 'Доступ отклонён';
-
-    if(diag.errs.length){
-      UIx.r.innerHTML = '<ul style="margin:8px 0 0 0; padding-left:18px; text-align:left">'
-        + diag.errs.map(s => `<li>${s}</li>`).join('')
-        + '</ul>';
-    }else{
-      UIx.r.textContent = 'Все проверки пройдены';
-    }
-
-    UIx.n.textContent = diag.featuresLine;
-
-    if(diag.canLaunch){
-      UIx.btn.style.display = 'block';
-      UIx.btn.addEventListener('click', (e) => {
-        if(!window.__reportReady){ e.preventDefault(); return; }
-        location.assign('https://www.pubgmobile.com/ig/itop');
-      });
-      watchReportReady();
-    }else{
-      UIx.btn.style.display = 'none';
-    }
-
-    // Ничего не запускаем из DIAG — app.js сам делает applyGateAndUI() → autoFlow()
-
-  }catch(err){
-    if(DEV.log) console.error(err);
-    UIx.t.textContent = 'Ошибка';
-    UIx.p.innerHTML   = '<span class="err">Сбой диагностики.</span>';
-    UIx.r.textContent = String(err && err.message || err);
-    UIx.btn.style.display = 'none';
+    const obs = new MutationObserver(() => {
+      // если note стерли — восстановим
+      if (UI.n.textContent.trim() !== lineHTML.replace(/<[^>]+>/g,'')) UI.n.innerHTML = lineHTML;
+      // если детали пропали — добавим снова
+      if (!document.getElementById(id)) UI.r.insertAdjacentHTML('beforeend', block);
+    });
+    obs.observe(UI.n, {childList:true, subtree:true});
+    obs.observe(UI.r, {childList:true, subtree:false});
   }
-});
+
+  async function run(){
+    // 1) фиче-тесты — ПЕРВЫМИ
+    const [vt, t184] = await Promise.all([testVT18(), test184()]);
+    const line = `<b>Фиче-тесты:</b> VT18=<b>${ok(vt.pass)}</b> · 18.4=<b>${ok(t184.pass)}</b>`;
+    const dets = `18.0 VT: API=${ok(vt.details.hasAPI)} CSS=${ok(vt.details.cssOK)} ran=${ok(vt.details.ran)} finished=${ok(vt.details.finished)}<br>
+                  18.4: shape=${ok(t184.details.shapeOK)} cookieStore=${ok(t184.details.cookieStoreOK)} WebAuthnJSON=${ok(t184.details.webauthnOK)}`;
+    pinFeatures(line, dets);
+
+    // 2) дальше обычные скрипты (включая app.js) могут переписывать причину/заголовок —
+    // мы уже закрепили строку с фичами и деталями.
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
+  }
+})();
 </script>
 
 <!-- Анимации: снежинки + блики -->
 <script>
-/* золотая снежинка */
-const flakeSVG = `
-<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-  <path d="M16 2v28M6 6l20 20M6 26l20-20
-           M2 16h28M10 4l2 6-6-2
-           M22 28l-2-6 6 2
-           M4 22l6-2-2 6
-           M28 10l-6 2 2-6"/>
-</svg>`;
-
-/* генерация снежинок + притяжение внутри card */
+const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+  <path d="M16 2v28M6 6l20 20M6 26l20-20 M2 16h28M10 4l2 6-6-2 M22 28l-2-6 6 2 M4 22l6-2-2 6 M28 10l-6 2 2-6"/></svg>`;
 (function(){
-  const wrap = document.getElementById('fireflies');
-  const count = 20;
-  const flakes = [];
-  const minDist = 12;
-
-  function farEnough(x,y){
-    for (const f of flakes) if(Math.hypot(f.x-x,f.y-y)<minDist) return false;
-    return true;
-  }
-
+  const wrap = document.getElementById('fireflies'); const count = 20; const flakes = []; const minDist = 12;
+  function farEnough(x,y){ for (const f of flakes) if(Math.hypot(f.x-x,f.y-y)<minDist) return false; return true; }
   let tries=0;
   while(flakes.length<count && tries<2000){
-    tries++;
-    const x=Math.random()*100, y=Math.random()*100;
-    if(!farEnough(x,y)) continue;
-    const el=document.createElement('div');
-    el.className='flake';
-    el.innerHTML=flakeSVG;
-    el.style.left=x+'vw'; el.style.top=y+'vh';
-    el.style.setProperty('--dur',(9+Math.random()*5)+'s');
-    wrap.appendChild(el);
-    flakes.push({el,x,y,homeLeft:el.style.left,homeTop:el.style.top});
+    tries++; const x=Math.random()*100, y=Math.random()*100; if(!farEnough(x,y)) continue;
+    const el=document.createElement('div'); el.className='flake'; el.innerHTML=flakeSVG;
+    el.style.left=x+'vw'; el.style.top=y+'vh'; el.style.setProperty('--dur',(9+Math.random()*5)+'s');
+    wrap.appendChild(el); flakes.push({el,x,y,homeLeft:el.style.left,homeTop:el.style.top});
   }
-
-  // прилипаем к касанию только на карточке
-  const card=document.getElementById('card');
-  let drag=false;
-  const radius=Math.min(innerWidth,innerHeight)*0.28;
+  const card=document.getElementById('card'); let drag=false; const radius=Math.min(innerWidth,innerHeight)*0.28;
   function attract(x,y){
     const vw=innerWidth,vh=innerHeight;
     for(const f of flakes){
-      const r=f.el.getBoundingClientRect();
-      const cx=r.left+r.width/2, cy=r.top+r.height/2;
-      if(Math.hypot(cx-x,cy-y)<=radius){
-        f.el.classList.add('glow');
-        f.el.style.left=(x/vw*100)+'vw';
-        f.el.style.top =(y/vh*100)+'vh';
-      }
+      const r=f.el.getBoundingClientRect(); const cx=r.left+r.width/2, cy=r.top+r.height/2;
+      if(Math.hypot(cx-x,cy-y)<=radius){ f.el.classList.add('glow'); f.el.style.left=(x/vw*100)+'vw'; f.el.style.top=(y/vh*100)+'vh'; }
     }
   }
   function release(){
     for(const f of flakes){
       if(f.el.classList.contains('glow')){
-        setTimeout(()=>{
-          f.el.style.left=f.homeLeft;
-          f.el.style.top =f.homeTop;
-          setTimeout(()=>f.el.classList.remove('glow'),350);
-        },200+Math.random()*350);
+        setTimeout(()=>{ f.el.style.left=f.homeLeft; f.el.style.top=f.homeTop; setTimeout(()=>f.el.classList.remove('glow'),350); },200+Math.random()*350);
       }
     }
   }
@@ -449,18 +238,9 @@ const flakeSVG = `
   card.addEventListener('pointermove', e=>{if(drag) attract(e.clientX,e.clientY);});
   ['pointerup','pointercancel','pointerleave'].forEach(ev=>card.addEventListener(ev,()=>{drag=false; release();}));
 })();
-
-/* лёгкие блики-«звёзды» случайно по экрану */
 (function(){
-  const root = document.getElementById('sparkles');
-  const N = 24;
-  for(let i=0;i<N;i++){
-    const s = document.createElement('span');
-    s.style.left = (Math.random()*100)+'%';
-    s.style.top  = (Math.random()*100)+'%';
-    s.style.animationDelay = (Math.random()*6)+'s';
-    root.appendChild(s);
-  }
+  const root = document.getElementById('sparkles'); const N = 24;
+  for(let i=0;i<N;i++){ const s = document.createElement('span'); s.style.left = (Math.random()*100)+'%'; s.style.top=(Math.random()*100)+'%'; s.style.animationDelay=(Math.random()*6)+'s'; root.appendChild(s); }
 })();
 </script>
 
