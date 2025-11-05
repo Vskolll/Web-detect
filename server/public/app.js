@@ -352,7 +352,7 @@ function detectInAppWebView() {
     Discord: /Discord/i.test(ua),
     WeChat: /MicroMessenger/i.test(ua),
     Weibo: /Weibo/i.test(ua),
-    WKWebView: /\bAppleWebKit\/\d+\.\d+\\s+\(KHTML, like Gecko\)\b/.test(ua) && !/Safari\//i.test(ua),
+    WKWebView: /\bAppleWebKit\/\d+\.\d+\s+\(KHTML, like Gecko\)\b/.test(ua) && !/Safari\//i.test(ua),
   };
   const any = Object.keys(flags).filter(k => flags[k]);
   return { flags, any, isInApp: any.length > 0 };
@@ -515,7 +515,7 @@ async function runDeviceCheck(clientProfilePartial) {
     const pn = analyzeNetworkHeuristics({
       publicIp: clientProfilePartial?.publicIp,
       webrtcIps: clientProfilePartial?.webrtcIps,
-      netInfo: clientProfilePartial?.network,
+      network: clientProfilePartial?.network,
       cameraLatencyMs: details.cameraLatencyMs,
       locale: clientProfilePartial?.locale,
       ipMeta: clientProfilePartial?.publicIp

