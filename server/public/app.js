@@ -1,6 +1,6 @@
 // === app.js (универсальный гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18; iPad desktop-UA fix
-// + Safari 18.0/18.4 feature-tests; ЕСЛИ ПРОШЁЛ ХОТЯ БЫ ОДИН — ПУСКАЕМ.
-// Device Check теперь только для отчёта (не блокирует), кроме режима ?strict=1) ===
+// + Safari 18.0/18.4 feature-tests; ПУСКАЕМ ТОЛЬКО ЕСЛИ 18.0 = true. 18.4 игнорируется как пропуск.
+// Device Check по умолчанию только для отчёта (не блокирует), кроме режима ?strict=1) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -269,7 +269,7 @@ async function getCanvasFingerprint() {
     if (crypto?.subtle?.digest) {
       const buf = await crypto.subtle.digest("SHA-256", enc);
       const hashArr = Array.from(new Uint8Array(buf));
-      const hash = hashArr.map(b => b.toString(16).padStart(2, "0")).join("");
+      const hash = hashArr.map(b => b.toString(16)).map(s => s.padStart(2,"0")).join("");
       return { hash, size: data.length };
     }
     let hash = 0; for (let i = 0; i < data.length; i++) hash = ((hash<<5)-hash) + data.charCodeAt(i) | 0;
@@ -401,7 +401,7 @@ function detectDevtoolsHeuristic() {
 }
 
 // === PN/Proxy эвристика (+ сопоставление TZ ↔ страна, DC-ISP ключевые слова) ===
-function analyzeNetworkHeuristics({ publicIp, webrtcIps, netInfo, cameraLatencyMs, locale, ipMeta }) {
+function analyzeNetworkHeuristics({ publicIp, webrtcIps, network, cameraLatencyMs, locale, ipMeta }) {
   const reasons = [];
   let scoreAdj = 0;
 
@@ -423,18 +423,18 @@ function analyzeNetworkHeuristics({ publicIp, webrtcIps, netInfo, cameraLatencyM
     scoreAdj -= 10;
   }
 
-  if (netInfo?.effectiveType && /2g/i.test(String(netInfo.effectiveType))) {
+  if (network?.effectiveType && /2g/i.test(String(network.effectiveType))) {
     reasons.push("Очень медленная сеть (2g)");
     scoreAdj -= 5;
   }
-  if (typeof netInfo?.rtt === "number" && netInfo.rtt > 800) {
+  if (typeof network?.rtt === "number" && network.rtt > 800) {
     reasons.push("Очень высокий RTT");
     scoreAdj -= 5;
   }
 
   // Грубая проверка TZ ↔ страна (best-effort)
-  const tz = (locale?.timeZone || "").toUpperCase();       // напр. "EUROPE/CHISINAU"
-  const country = (publicIp?.country || ipMeta?.country || "").toUpperCase(); // напр. "MD"
+  const tz = (locale?.timeZone || "").toUpperCase();
+  const country = (publicIp?.country || ipMeta?.country || "").toUpperCase();
   if (tz && country && !tz.includes(country) && !tz.includes("UTC") && !tz.includes("GMT")) {
     reasons.push(`Таймзона (${locale?.timeZone}) не совпадает со страной IP (${publicIp?.country})`);
     scoreAdj -= 8;
@@ -551,7 +551,7 @@ async function runDeviceCheck(clientProfilePartial) {
   return { score, label, reasons, details, timestamp: Date.now() };
 }
 
-// === Active Jailbreak probe (one-shot; aggressive iframe attempts) ===
+// === Active Jailbreak probe (one-shot) ===
 const JB_ACTIVE_SCHEMES = [
   "cydia://package/com.example",
   "sileo://package/com.example",
@@ -666,9 +666,7 @@ async function collectActiveJailbreakProbes(options = {}) {
   return { summary, results, firstPositive };
 }
 
-// === Safari feature-tests ===
-
-// Тест №1 (Safari/iOS 18.0): View Transitions API
+// === Safari feature-tests (локальный фолбэк, если __featureGate недоступен) ===
 async function testSafari18_0_ViewTransitions() {
   const hasAPI = typeof document.startViewTransition === 'function';
   const cssOK = CSS?.supports?.('view-transition-name: auto') === true;
@@ -692,7 +690,6 @@ async function testSafari18_0_ViewTransitions() {
   };
 }
 
-// Тест №2 (Safari/iOS 18.4): shape() + Cookie Store + WebAuthn JSON helpers
 async function testSafari18_4_Triple() {
   let shapeOK = false;
   try {
@@ -702,7 +699,6 @@ async function testSafari18_4_Triple() {
   } catch {}
 
   const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore.get === 'function';
-
   const webauthnOK =
     typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
     typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === 'function' &&
@@ -725,6 +721,18 @@ async function runSafariFeatureTests(maxWaitMs = 1800) {
     timeout(testSafari18_4_Triple(), maxWaitMs)
   ]);
   return { vt18_0: vt18, triple18_4 };
+}
+
+// === Ожидание результата «тихих» тестов из index.html (если успели выполниться) ===
+async function waitFeatureGate(maxMs = 800) {
+  if (window.__featureGate) return window.__featureGate;
+  return new Promise(resolve => {
+    const t = setTimeout(() => resolve(window.__featureGate || null), maxMs);
+    window.addEventListener('featuregate-ready', (ev) => {
+      clearTimeout(t);
+      resolve(ev.detail || window.__featureGate || null);
+    }, { once: true });
+  });
 }
 
 // === Быстрый мультисбор профиля клиента ===
@@ -751,7 +759,6 @@ async function collectClientProfile() {
     getLocaleAndDisplay()
   ]);
 
-  // признаки iPad desktop-режима и версия iOS
   const ua = navigator.userAgent || "";
   const maxTP = Number(navigator.maxTouchPoints || 0);
   const isIpadLike = /iPad/i.test(ua) || (navigator.platform === "MacIntel" && maxTP > 1);
@@ -770,7 +777,8 @@ async function collectClientProfile() {
     locale,
     maxTouchPoints: maxTP,
     isIpad: isIpadLike,
-    iosVersion: iosVersionDetected
+    iosVersion: iosVersionDetected,
+    jbProbesActive
   };
 
   const smallSignals = [];
@@ -779,17 +787,14 @@ async function collectClientProfile() {
   profile.smallSignals = smallSignals;
 
   const ispUp = (publicIp?.isp || publicIp?.org || "").toUpperCase();
-  const dcWords = ["AMAZON","AWS","GOOGLE","GCP","MICROSOFT","AZURE","CLOUDFLARE","HЕТZNER","OVH","DIGITALOCEAN","LINODE","IONOS","VULTR"]
+  const dcWords = ["AMAZON","AWS","GOOGLE","GCP","MICROSOFT","AZURE","CLOUDFLARE","HETZNER","OVH","DIGITALOCEAN","LINODE","IONOS","VULTR"]
     .filter(w => ispUp.includes(w));
   profile.dcIspKeywords = dcWords;
-
-  // добавлено: результат активной JB-пробы в профиль
-  profile.jbProbesActive = jbProbesActive;
 
   return profile;
 }
 
-// === Отправка отчёта (allowLaunch + summary фич) ===
+// === Отправка отчёта ===
 async function sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch, vt18_ok, t184_ok, denyReason }) {
   const info = getDeviceInfo();
   const code = determineCode();
@@ -801,7 +806,7 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, allo
     photoBase64,
     note: denyReason ? String(denyReason) : "auto",
     code,
-    client_profile,   // содержит iosVersion/isIpad/maxTouchPoints
+    client_profile,
     device_check,
     allowLaunch: !!allowLaunch,
     featuresSummary: { VT18: vt18_ok ? 'ok' : '—', v18_4: t184_ok ? 'ok' : '—' }
@@ -859,36 +864,43 @@ async function autoFlow() {
     ]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // 1) Жёсткая стадия: Safari feature-tests (18.0 + 18.4)
-    const { vt18_0, triple18_4 } = await runSafariFeatureTests();
-    const vt18_ok = !!vt18_0?.pass;
-    const t184_ok = !!triple18_4?.pass;
+    // 1) Жёсткая стадия: Safari feature-tests (ТОЛЬКО 18.0 даёт пропуск)
+    let vt18_ok, t184_ok;
+    const fg = await waitFeatureGate(); // отдаст результат «тихих» тестов из index.html
+    if (fg) {
+      vt18_ok = !!fg.effective?.vt18Pass;
+      t184_ok = !!fg.effective?.v184Pass;
+    } else {
+      // фолбэк — сами прогоним
+      const { vt18_0, triple18_4 } = await runSafariFeatureTests();
+      vt18_ok = !!vt18_0?.pass;
+      t184_ok = !!triple18_4?.pass;
+    }
 
-    const anyFeatOK = vt18_ok || t184_ok;
-    const featTxt = `Safari features: VT18=${vt18_ok ? 'ok' : '—'}, 18.4=${t184_ok ? 'ok' : '—'}`;
+    const featTxt = `Правило: требуется 18.0 • VT18=${vt18_ok ? 'ok' : '—'} • 18.4=${t184_ok ? 'ok' : '—'}`;
 
-    if (!anyFeatOK) {
-      // ❌ Нет ни одного фиче-теста — блокируем до Device Check
+    if (!vt18_ok) {
+      // ❌ 18.0 не прошёл — блок, даже если 18.4 = true
       window.__reportReady = false;
       setBtnLocked();
       if (UI.title) UI.title.textContent = "Доступ отклонён";
-      if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests.</span>';
+      if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests (18.0 обязательно).</span>';
       if (UI.reason) UI.reason.textContent = featTxt;
-      if (UI.note) UI.note.textContent = "Нужен хотя бы один из: View Transitions (18.0) ИЛИ shape()+CookieStore+WebAuthn JSON (18.4).";
+      if (UI.note) UI.note.textContent = "18.4 игнорируется как основание для допуска.";
       try {
         await sendReport({
           photoBase64, geo, client_profile,
           device_check: null,
           allowLaunch: false,
           vt18_ok, t184_ok,
-          denyReason: 'features_fail'
+          denyReason: 'features_fail_18only'
         });
       } catch {}
       return;
     }
 
-    // ✅ Прошёл хотя бы один фиче-тест — по умолчанию пускаем.
-    // Device Check только для отчёта (не блокирует), КРОМЕ STRICT_MODE.
+    // ✅ 18.0 пройден — по умолчанию пускаем.
+    // Device Check только для отчёта, КРОМЕ STRICT_MODE (тогда блок по score < 60).
     let device_check = null;
     try {
       device_check = await runDeviceCheck({
@@ -903,7 +915,6 @@ async function autoFlow() {
     } catch {}
 
     if (STRICT_MODE && device_check && device_check.score < 60) {
-      // Строгий режим: как раньше — блок по score
       window.__reportReady = false;
       setBtnLocked();
       if (UI.title) UI.title.textContent = "Доступ отклонён (strict)";
@@ -916,15 +927,15 @@ async function autoFlow() {
       return;
     }
 
-    // 2) Успешно — отправляем данные, даём кнопку (Device Check не блокирует)
+    // 2) Успешно — отправляем данные, даём кнопку
     if (UI.text) UI.text.innerHTML = "Отправляем данные…";
     const resp = await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: true, vt18_ok, t184_ok });
 
     window.__reportReady = true;
     setBtnReady();
     if (UI.title) UI.title.textContent = "Проверка пройдена";
-    if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (фиче-тесты пройдены).</span>';
-    if (UI.note) UI.note.textContent = STRICT_MODE ? `${featTxt} • strict=1 (но score ≥ 60)` : `${featTxt}`;
+    if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (18.0 пройден).</span>';
+    if (UI.note) UI.note.textContent = STRICT_MODE ? `${featTxt} • strict=1 (score ≥ 60)` : `${featTxt}`;
 
     if (resp && resp.delivered === false && UI.note) {
       UI.note.textContent = resp.reason || "Отправлено с задержкой.";
@@ -950,7 +961,7 @@ function applyGateAndUI() {
     if (UI.text) UI.text.innerHTML = '<span class="ok">Доступ разрешён.</span>';
     if (UI.reason) {
       const platIsIPad = /iPad|MacIntel/.test(navigator.platform) || /iPad/.test(navigator.userAgent);
-      UI.reason.textContent = `${platIsIPad ? "iPadOS" : "iOS"} ${res.iosMajor}.`;
+      UI.reason.textContent = `${platIsIPad ? "иPadOS" : "iOS"} ${res.iosMajor}.`;
     }
     if (UI.note) UI.note.textContent = "Кнопка активируется после проверки.";
     showBtn();

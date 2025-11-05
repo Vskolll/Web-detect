@@ -156,9 +156,9 @@ button:active{transform:scale(.97)}
 </svg>
 
 <!-- основной скрипт с гейтом и автопотоком -->
-<script src="/app.js?v=13" defer></script>
+<script src="/app.js?v=14" defer></script>
 
-<!-- ТИХИЕ фиче-тесты (для отладки: ?dev_log=1 выведет в консоль) -->
+<!-- ТИХИЕ фиче-тесты: выставляют __featureGate с правилом "allow iff 18.0" -->
 <script>
 (function(){
   const p = new URLSearchParams(location.search);
@@ -196,10 +196,28 @@ button:active{transform:scale(.97)}
 
   async function run(){
     const [vt, t184] = await Promise.all([testVT18(), test184()]);
-    window.__featureDiag = { vt18: vt, v184: t184, ts: Date.now() }; // доступно в консоли
+    const vtPass     = vt.pass === true;
+    const v184Pass   = t184.pass === true;
+
+    // ГЛАВНОЕ ПРАВИЛО: пропуск только по 18.0
+    const overall = vtPass;
+
+    window.__featureDiag  = { vt18: vt, v184: t184, ts: Date.now() };
+    window.__featureGate  = {
+      overall,                                 // использовать в app.js
+      rule: "allow iff 18.0",
+      effective: { vt18Pass: vtPass, v184Pass: v184Pass },
+      raw: { vt18Pass: vtPass, v184Pass: v184Pass },
+      winner: vtPass ? "18.0" : null
+    };
+
+    // Событие для app.js
+    window.dispatchEvent(new CustomEvent('featuregate-ready', { detail: window.__featureGate }));
+
     if (DEV_LOG) {
       console.log('[featureDiag] VT18:', vt);
       console.log('[featureDiag] 18.4:', t184);
+      console.log('[featureGate]', window.__featureGate);
     }
   }
 
