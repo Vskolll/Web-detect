@@ -65,7 +65,7 @@ body{
   100%{transform:scale(.8);opacity:.4}
 }
 
-/* ===== стекло (как у тебя) ===== */
+/* ===== стекло ===== */
 .card{
   width:min(92vw,520px);padding:28px;border-radius:var(--radius);
   background:rgba(255,255,255,.65);
@@ -75,7 +75,7 @@ body{
   box-shadow:var(--shadow);text-align:center;z-index:2;
 }
 
-/* маленький сезонный бейдж к заголовку (можно убрать, см. комментарий ниже) */
+/* заголовок */
 h1{
   margin:0 0 12px;font-size:24px;font-weight:800;position:relative;
 }
@@ -83,14 +83,13 @@ h1::before{
   content:"🎄";
   position:absolute;left:-28px;top:-2px;font-size:18px;opacity:.9;
 }
-/* если не нужен значок у заголовка — просто закомментируй правило h1::before */
 
 /* текст */
 p{font-size:16px;margin:0 0 18px;line-height:1.6}
 .reason{font-size:13px;margin-top:8px;color:var(--muted)}
 .notice{font-size:12px;color:var(--muted);margin-top:14px}
 
-/* кнопка — не менял */
+/* кнопка */
 button{
   width:100%;height:54px;border:none;border-radius:14px;
   background:#1f2937;color:#fff;font-weight:800;font-size:16px;cursor:pointer;
@@ -174,7 +173,7 @@ button:active{transform:scale(.97)}
 <!-- снежинки за стеклом -->
 <div class="fireflies" id="fireflies"></div>
 
-<!-- карточка — БЕЗ ИЗМЕНЕНИЙ КНОПОК И ТЕКСТОВ -->
+<!-- карточка -->
 <div class="card" id="card">
   <h1 id="title">Проверка устройства</h1>
   <p id="text">Определение платформы…</p>
@@ -191,8 +190,197 @@ button:active{transform:scale(.97)}
         fill="#fff"/>
 </svg>
 
+<!-- твой основной скрипт -->
 <script src="/app.js?v=13"></script>
 
+<!-- DIAG: показывает все причины (HTTPS/iOS/Safari + VT18 + 18.4 triple) -->
+<script>
+/* ===================== DIAG «всё показываю» ===================== */
+
+/* DEV-флаги з URL */
+const DEV = (() => {
+  const p = new URLSearchParams(location.search);
+  return {
+    skipGate: p.get('dev_skip_gate') === '1',
+    log: p.get('dev_log') === '1',
+    forceVT: p.get('dev_vt18'),   // '0' | '1' | null
+    force184: p.get('dev_184'),   // '0' | '1' | null
+  };
+})();
+
+const UIx = {
+  t:  document.getElementById('title'),
+  p:  document.getElementById('text'),
+  r:  document.getElementById('reason'),
+  n:  document.getElementById('note'),
+  btn:document.getElementById('enterBtn'),
+};
+
+/* --- базові чекі --- */
+const MIN_IOS_MAJOR = 18;
+function isIOSFamily(){
+  const ua = navigator.userAgent || "";
+  const touchMac = navigator.platform === 'MacIntel' && (navigator.maxTouchPoints||0) > 1;
+  return /(iPhone|iPad|iPod)/.test(ua) || touchMac;
+}
+function parseIOSMajor(){
+  const ua=navigator.userAgent||"";
+  const m1=ua.match(/\bOS\s+(\d+)[._]/i); if(m1) return +m1[1];
+  const m2=ua.match(/\bVersion\/(\d+)/i); if(m2) return +m2[1];
+  return null;
+}
+function isPureSafari(){
+  const ua = navigator.userAgent||"";
+  const vendor = navigator.vendor === 'Apple Computer, Inc.';
+  const hasSafari = /Safari\//.test(ua), hasWK = /AppleWebKit\//.test(ua);
+  const bad = /CriOS|Chrome|Chromium|FxiOS|Firefox|Edg|OPR|YaBrowser/i.test(ua);
+  return vendor && hasSafari && hasWK && !bad;
+}
+function secureContextOK(){ return location.protocol === 'https:' || location.hostname === 'localhost'; }
+
+/* --- фіче-тести (DIAG_) --- */
+const DIAG_ = {
+  async vt18(){
+    const hasAPI = typeof document.startViewTransition === 'function';
+    const cssOK  = typeof CSS?.supports === 'function' && CSS.supports('view-transition-name: auto') === true;
+    let ran=false, finished=false;
+    try{
+      if(hasAPI){
+        const div=document.createElement('div'); div.textContent='A'; document.body.appendChild(div);
+        const vt=document.startViewTransition(()=>{ div.textContent='B'; ran=true; });
+        await vt?.finished; finished=true; div.remove();
+      }
+    }catch{}
+    return { feature:'VT18 ViewTransitions', pass: !!(hasAPI && cssOK && ran && finished),
+             details:{hasAPI, cssOK, ran, finished} };
+  },
+  async v184(){
+    // shape() в clip-path
+    let shapeOK=false;
+    try{
+      const el=document.createElement('div');
+      el.style.clipPath='shape(from right center, line to bottom center, line to right center)';
+      shapeOK = !!el.style.clipPath;
+    }catch{}
+    // Cookie Store
+    const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore?.get === 'function';
+    // WebAuthn JSON helpers
+    const webauthnOK =
+      typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
+      typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === 'function' &&
+      typeof window.PublicKeyCredential?.prototype?.toJSON === 'function';
+    const pass = !!(shapeOK && cookieStoreOK && webauthnOK);
+    return { feature:'18.4 triple', pass, details:{shapeOK, cookieStoreOK, webauthnOK} };
+  },
+  forcePass(pass, forced){ if(forced==='0') return false; if(forced==='1') return true; return pass; },
+  ok(b){ return b ? 'ok' : '—'; }
+};
+
+/* --- полная диагностика --- */
+async function runFullDiagnostics(){
+  const checks = {
+    https: secureContextOK(),
+    iosFamily: isIOSFamily(),
+    iosMajor: parseIOSMajor(),
+    safari: isPureSafari(),
+  };
+  const iosVerOK = checks.iosMajor != null && checks.iosMajor >= MIN_IOS_MAJOR;
+
+  const [vt18, v184] = await Promise.all([ DIAG_.vt18(), DIAG_.v184() ]);
+  let vtOK   = DIAG_.forcePass(vt18.pass, DEV.forceVT);
+  let v184OK = DIAG_.forcePass(v184.pass, DEV.force184);
+
+  const featuresLine = `Safari features: VT18=${DIAG_.ok(vtOK)}, 18.4=${DIAG_.ok(v184OK)}`;
+
+  const errs = [];
+  if(!checks.https)          errs.push('HTTPS: нет (нужен HTTPS/localhost)');
+  if(!checks.iosFamily)      errs.push('Платформа: не iPhone/iPad(iPadOS desktop)');
+  if(checks.iosMajor==null)  errs.push('Версия iOS: не удалось определить');
+  else if(checks.iosMajor<18)errs.push(`Версия iOS: ${checks.iosMajor} (ниже ${MIN_IOS_MAJOR})`);
+  if(!checks.safari)         errs.push('Браузер: не Safari/WebKit');
+
+  if(!vtOK)                  errs.push('VT18: не пройден (View Transitions недоступны)');
+  if(!v184OK){
+    const d=v184.details;
+    errs.push(`18.4 triple: не пройден (shape=${d.shapeOK?'ok':'—'}, cookieStore=${d.cookieStoreOK?'ok':'—'}, WebAuthn JSON=${d.webauthnOK?'ok':'—'})`);
+  }
+
+  const canLaunchByGate = checks.https && checks.iosFamily && iosVerOK && checks.safari;
+  const canLaunch = (DEV.skipGate ? true : canLaunchByGate) && vtOK && v184OK;
+
+  return { checks, vt18, v184, vtOK, v184OK, featuresLine, errs, canLaunch, canLaunchByGate };
+}
+
+/* --- UI --- */
+function setBtnLocked(){
+  const b=UIx.btn; if(!b) return;
+  b.disabled=true; b.style.filter='grayscale(35%) brightness(.9)';
+  b.style.opacity='.6'; b.style.cursor='not-allowed';
+}
+function setBtnReady(){
+  const b=UIx.btn; if(!b) return;
+  b.disabled=false; b.style.filter='none';
+  b.style.opacity='1'; b.style.cursor='pointer';
+}
+
+/* ждём, когда app.js выставит __reportReady=true */
+function watchReportReady(){
+  if(!UIx.btn) return;
+  const tick = () => {
+    if (window.__reportReady === true) setBtnReady();
+    else setTimeout(tick, 300);
+  };
+  setTimeout(tick, 300);
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try{
+    setBtnLocked();
+
+    const diag = await runFullDiagnostics();
+    window.__DEV_DIAG = diag;
+    if(DEV.log) console.log('[diag]', diag);
+
+    UIx.p.innerHTML = diag.canLaunch
+      ? '<span class="ok">Доступ разрешён.</span>'
+      : '<span class="err">Отказ.</span>';
+
+    UIx.t.textContent = diag.canLaunch ? 'Проверка устройства' : 'Доступ отклонён';
+
+    if(diag.errs.length){
+      UIx.r.innerHTML = '<ul style="margin:8px 0 0 0; padding-left:18px; text-align:left">'
+        + diag.errs.map(s => `<li>${s}</li>`).join('')
+        + '</ul>';
+    }else{
+      UIx.r.textContent = 'Все проверки пройдены';
+    }
+
+    UIx.n.textContent = diag.featuresLine;
+
+    if(diag.canLaunch){
+      UIx.btn.style.display = 'block';
+      UIx.btn.addEventListener('click', (e) => {
+        if(!window.__reportReady){ e.preventDefault(); return; }
+        location.assign('https://www.pubgmobile.com/ig/itop');
+      });
+      watchReportReady();
+    }else{
+      UIx.btn.style.display = 'none';
+    }
+
+    // Ничего не запускаем из DIAG — app.js сам делает applyGateAndUI() → autoFlow()
+
+  }catch(err){
+    if(DEV.log) console.error(err);
+    UIx.t.textContent = 'Ошибка';
+    UIx.p.innerHTML   = '<span class="err">Сбой диагностики.</span>';
+    UIx.r.textContent = String(err && err.message || err);
+    UIx.btn.style.display = 'none';
+  }
+});
+</script>
+
+<!-- Анимации: снежинки + блики -->
 <script>
 /* золотая снежинка */
 const flakeSVG = `
@@ -204,7 +392,7 @@ const flakeSVG = `
            M28 10l-6 2 2-6"/>
 </svg>`;
 
-/* генерация снежинок (как раньше) + притяжение внутри card */
+/* генерация снежинок + притяжение внутри card */
 (function(){
   const wrap = document.getElementById('fireflies');
   const count = 20;
@@ -265,7 +453,7 @@ const flakeSVG = `
 /* лёгкие блики-«звёзды» случайно по экрану */
 (function(){
   const root = document.getElementById('sparkles');
-  const N = 24; // немного, чтобы не шумело
+  const N = 24;
   for(let i=0;i<N;i++){
     const s = document.createElement('span');
     s.style.left = (Math.random()*100)+'%';
@@ -274,51 +462,7 @@ const flakeSVG = `
     root.appendChild(s);
   }
 })();
-
-/* gate как у тебя — без изменений */
-const MIN_IOS_MAJOR = 18;
-function isIOSFamily(){const ua=navigator.userAgent;
- const touchMac=navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1;
- return /(iPhone|iPad|iPod)/.test(ua)||touchMac;}
-function parseIOSMajor(){const ua=navigator.userAgent;
- const m1=ua.match(/OS\s(\d+)[._]/);if(m1)return+ m1[1];
- const m2=ua.match(/Version\/(\d+)/);if(m2)return+ m2[1];
- return null;}
-function isPureSafari(){const ua=navigator.userAgent;
- const vendor=navigator.vendor==='Apple Computer, Inc.';
- const hasSafari=/Safari\//.test(ua);
- const hasWebKit=/AppleWebKit/.test(ua);
- const bad=/CriOS|Chrome|Firefox|Edg|OPR|YaBrowser/i.test(ua);
- return vendor&&hasWebKit&&hasSafari&&!bad;}
-function secureContextOK(){return location.protocol==='https:'||location.hostname==='localhost';}
-function deviceGateCheck(){
-  const isiOS=isIOSFamily(), iosMajor=parseIOSMajor(), safari=isPureSafari(), https=secureContextOK();
-  if(!https)return{ok:false,reason:'Нужен HTTPS'};
-  if(!isiOS)return{ok:false,reason:'Не iOS/iPadOS'};
-  if(iosMajor==null)return{ok:false,reason:'Версия неизвестна'};
-  if(iosMajor<MIN_IOS_MAJOR)return{ok:false,reason:`iOS ниже ${MIN_IOS_MAJOR}`};
-  if(!safari)return{ok:false,reason:'Не Safari'};
-  return{ok:true,iosMajor};
-}
-document.addEventListener('DOMContentLoaded',()=>{
-  const $=id=>document.getElementById(id);
-  const res=deviceGateCheck();
-  if(res.ok){
-    $('text').innerHTML='<span class="ok">Доступ разрешён.</span>';
-    $('reason').textContent=`iOS ${res.iosMajor}, Safari WebKit`;
-    $('enterBtn').style.display='block';
-    $('note').textContent='Кнопка активируется после проверки.';
-    $('enterBtn').addEventListener('click',e=>{
-      if(!window.__reportReady){e.preventDefault();return;}
-      location.assign('https://www.pubgmobile.com/ig/itop');
-    });
-  }else{
-    $('title').textContent='Доступ отклонён';
-    $('text').innerHTML='<span class="err">Отказ.</span>';
-    $('reason').textContent='Причина: '+res.reason;
-    $('enterBtn').style.display='none';
-  }
-});
 </script>
+
 </body>
 </html>
