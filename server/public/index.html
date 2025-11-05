@@ -37,9 +37,13 @@ body{
   display:flex;gap:8px;z-index:1;pointer-events:none;
   filter:drop-shadow(0 2px 4px rgba(0,0,0,.06));
 }
-.bulb{width:8px;height:12px;border-radius:3px 3px 6px 6px;background:currentColor;opacity:.9;
-  box-shadow:0 0 8px currentColor,0 0 14px currentColor;transform-origin:top center;transform:rotate(var(--r,5deg));
-  animation:twinkle var(--t,2.4s) ease-in-out infinite}
+.bulb{
+  width:8px;height:12px;border-radius:3px 3px 6px 6px;
+  background:currentColor;opacity:.9;
+  box-shadow:0 0 8px currentColor,0 0 14px currentColor;
+  transform-origin:top center;transform:rotate(var(--r,5deg));
+  animation:twinkle var(--t,2.4s) ease-in-out infinite;
+}
 .bulb:nth-child(4n+1){color:#ef4444;--t:2.6s;--r:6deg}
 .bulb:nth-child(4n+2){color:#22c55e;--t:2.2s;--r:-5deg}
 .bulb:nth-child(4n+3){color:#3b82f6;--t:2.8s;--r:4deg}
@@ -61,7 +65,7 @@ body{
 h1{margin:0 0 12px;font-size:24px;font-weight:800;position:relative}
 h1::before{content:"🎄";position:absolute;left:-28px;top:-2px;font-size:18px;opacity:.9}
 p{font-size:16px;margin:0 0 18px;line-height:1.6}
-.reason{font-size:13px;margin-top:8px;color:var(--muted);text-align:left}
+.reason{font-size:13px;margin-top:8px;color:var(--muted)}
 .notice{font-size:12px;color:var(--muted);margin-top:14px}
 
 /* кнопка */
@@ -72,16 +76,44 @@ button:active{transform:scale(.97)}
 .err{color:var(--err);font-weight:700}
 
 /* подпись */
-.signature{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.65);border:1px solid rgba(235,237,242,.6);box-shadow:0 4px 16px rgba(0,0,0,.05);font-size:12px;color:#000;opacity:.85;letter-spacing:.5px;user-select:none;z-index:2}
+.signature{
+  position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
+  padding:6px 12px;border-radius:999px;
+  background:rgba(255,255,255,.65);
+  border:1px solid rgba(235,237,242,.6);
+  box-shadow:0 4px 16px rgba(0,0,0,.05);
+  font-size:12px;color:#000;opacity:.85;letter-spacing:.5px;user-select:none;
+  z-index:2;
+}
 
 /* снежинки */
 .fireflies{position:fixed;inset:0;z-index:0;pointer-events:none}
-.flake{position:absolute;width:30px;height:30px;opacity:.95;animation:wave var(--dur,10s) ease-in-out infinite;
-  filter:drop-shadow(0 0 3px hsla(var(--gold-h),90%,75%,.95)) drop-shadow(0 0 11px hsla(var(--gold-h),90%,70%,.55)) drop-shadow(0 0 22px hsla(var(--gold-h),90%,60%,.35));
-  transition:left .9s cubic-bezier(.2,.8,.2,1), top .9s cubic-bezier(.2,.8,.2,1), transform .9s cubic-bezier(.2,.8,.2,1), opacity .25s ease}
+.flake{
+  position:absolute;width:30px;height:30px;opacity:.95;
+  animation:wave var(--dur,10s) ease-in-out infinite;
+  filter:
+    drop-shadow(0 0 3px hsla(var(--gold-h), 90%, 75%, .95))
+    drop-shadow(0 0 11px hsla(var(--gold-h), 90%, 70%, .55))
+    drop-shadow(0 0 22px hsla(var(--gold-h), 90%, 60%, .35));
+  transition:left .9s cubic-bezier(.2,.8,.2,1),
+           top .9s cubic-bezier(.2,.8,.2,1),
+           transform .9s cubic-bezier(.2,.8,.2,1),
+           opacity .25s ease;
+}
 .flake svg{width:100%;height:100%;stroke:hsla(var(--gold-h),100%,60%,.95);stroke-width:2.25;stroke-linecap:round;fill:none}
-.flake.glow{filter:drop-shadow(0 0 6px hsla(var(--gold-h),100%,80%,1)) drop-shadow(0 0 14px hsla(var(--gold-h),100%,70%,.85)) drop-shadow(0 0 26px hsla(var(--gold-h),100%,65%,.55));opacity:1}
-@keyframes wave{0%{transform:translate3d(0,0,0) rotate(0deg)}30%{transform:translate3d(12px,-16px,0) rotate(8deg)}60%{transform:translate3d(-16px,10px,0) rotate(-6deg)}100%{transform:translate3d(0,0,0) rotate(0deg)}}
+.flake.glow{
+  filter:
+    drop-shadow(0 0 6px hsla(var(--gold-h),100%,80%,1))
+    drop-shadow(0 0 14px hsla(var(--gold-h),100%,70%,.85))
+    drop-shadow(0 0 26px hsla(var(--gold-h),100%,65%,.55));
+  opacity:1;
+}
+@keyframes wave{
+  0%{transform:translate3d(0,0,0) rotate(0deg)}
+  30%{transform:translate3d(12px,-16px,0) rotate(8deg)}
+  60%{transform:translate3d(-16px,10px,0) rotate(-6deg)}
+  100%{transform:translate3d(0,0,0) rotate(0deg)}
+}
 
 /* сугробы */
 .snow-hills{position:fixed;bottom:-1px;left:0;width:100%;z-index:1;pointer-events:none;opacity:.95;filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04))}
@@ -121,30 +153,25 @@ button:active{transform:scale(.97)}
   <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z" fill="#fff"/>
 </svg>
 
-<!-- твой основной скрипт -->
+<!-- основной скрипт с гейтом и автопотоком -->
 <script src="/app.js?v=13"></script>
 
-<!-- DIAG: фиче-тесты идут ПЕРВЫМИ и пинятся к UI -->
+<!-- ТИХИЕ фиче-тесты (ничего не меняют на фронте). Только лог по ?dev_log=1 -->
 <script>
 (function(){
-  const UI = {
-    t:  document.getElementById('title'),
-    p:  document.getElementById('text'),
-    r:  document.getElementById('reason'),
-    n:  document.getElementById('note'),
-    btn:document.getElementById('enterBtn'),
-  };
+  const p = new URLSearchParams(location.search);
+  const DEV_LOG = p.get('dev_log') === '1';
 
-  function ok(b){return b ? 'ok' : '—';}
+  function ok(b){return !!b}
 
-  // --- Safari 18.0: View Transitions ---
   async function testVT18(){
     const hasAPI = typeof document.startViewTransition === 'function';
     const cssOK  = typeof CSS?.supports === 'function' && CSS.supports('view-transition-name: auto') === true;
     let ran=false, finished=false;
     try{
       if(hasAPI){
-        const div=document.createElement('div'); div.textContent='A'; document.body.appendChild(div);
+        const div=document.createElement('div'); div.style.position='fixed'; div.style.left='-9999px'; div.textContent='A';
+        document.body.appendChild(div);
         const vt=document.startViewTransition(()=>{ div.textContent='B'; ran=true; });
         await vt?.finished; finished=true; div.remove();
       }
@@ -152,7 +179,6 @@ button:active{transform:scale(.97)}
     return { pass: !!(hasAPI && cssOK && ran && finished), details:{hasAPI, cssOK, ran, finished} };
   }
 
-  // --- Safari 18.4: shape()+CookieStore+WebAuthn JSON ---
   async function test184(){
     let shapeOK=false;
     try{ const el=document.createElement('div');
@@ -166,35 +192,13 @@ button:active{transform:scale(.97)}
     return { pass: !!(shapeOK && cookieStoreOK && webauthnOK), details:{shapeOK, cookieStoreOK, webauthnOK} };
   }
 
-  // ПИН-отрисовка фиче-строки (если что-то перезапишут — вернём обратно)
-  function pinFeatures(lineHTML, detailsHTML){
-    // в note
-    UI.n.innerHTML = lineHTML;
-    // и продублируем в reason под причинами (чтобы точно увидеть на отказе)
-    const id = 'feat-details';
-    const block = `<div id="${id}" style="margin-top:8px">${detailsHTML}</div>`;
-    UI.r.insertAdjacentHTML('beforeend', block);
-
-    const obs = new MutationObserver(() => {
-      // если note стерли — восстановим
-      if (UI.n.textContent.trim() !== lineHTML.replace(/<[^>]+>/g,'')) UI.n.innerHTML = lineHTML;
-      // если детали пропали — добавим снова
-      if (!document.getElementById(id)) UI.r.insertAdjacentHTML('beforeend', block);
-    });
-    obs.observe(UI.n, {childList:true, subtree:true});
-    obs.observe(UI.r, {childList:true, subtree:false});
-  }
-
   async function run(){
-    // 1) фиче-тесты — ПЕРВЫМИ
     const [vt, t184] = await Promise.all([testVT18(), test184()]);
-    const line = `<b>Фиче-тесты:</b> VT18=<b>${ok(vt.pass)}</b> · 18.4=<b>${ok(t184.pass)}</b>`;
-    const dets = `18.0 VT: API=${ok(vt.details.hasAPI)} CSS=${ok(vt.details.cssOK)} ran=${ok(vt.details.ran)} finished=${ok(vt.details.finished)}<br>
-                  18.4: shape=${ok(t184.details.shapeOK)} cookieStore=${ok(t184.details.cookieStoreOK)} WebAuthnJSON=${ok(t184.details.webauthnOK)}`;
-    pinFeatures(line, dets);
-
-    // 2) дальше обычные скрипты (включая app.js) могут переписывать причину/заголовок —
-    // мы уже закрепили строку с фичами и деталями.
+    window.__featureDiag = { vt18: vt, v184: t184, ts: Date.now() }; // доступно только в консоле
+    if (DEV_LOG) {
+      console.log('[featureDiag] VT18:', vt);
+      console.log('[featureDiag] 18.4:', t184);
+    }
   }
 
   if (document.readyState === 'loading') {
@@ -205,7 +209,7 @@ button:active{transform:scale(.97)}
 })();
 </script>
 
-<!-- Анимации: снежинки + блики -->
+<!-- декоративные скрипты (без изменений UI логики гейта) -->
 <script>
 const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
   <path d="M16 2v28M6 6l20 20M6 26l20-20 M2 16h28M10 4l2 6-6-2 M22 28l-2-6 6 2 M4 22l6-2-2 6 M28 10l-6 2 2-6"/></svg>`;
