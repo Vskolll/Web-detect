@@ -1,5 +1,5 @@
 // === app.js (универсальный + жёсткий гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18; iPad desktop-UA fix
-// + Safari 18.0/18.4 feature-tests; если оба ok — выполняем старую проверку (Device Check)) ===
+// + Safari 18.0/18.4 feature-tests; если прошёл ХОТЯ БЫ ОДИН — выполняем старую проверку (Device Check)) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -515,7 +515,7 @@ async function runDeviceCheck(clientProfilePartial) {
     const pn = analyzeNetworkHeuristics({
       publicIp: clientProfilePartial?.publicIp,
       webrtcIps: clientProfilePartial?.webrtcIps,
-      network: clientProfilePartial?.network,
+      netInfo: clientProfilePartial?.network,
       cameraLatencyMs: details.cameraLatencyMs,
       locale: clientProfilePartial?.locale,
       ipMeta: clientProfilePartial?.publicIp
@@ -779,6 +779,9 @@ async function collectClientProfile() {
     .filter(w => ispUp.includes(w));
   profile.dcIspKeywords = dcWords;
 
+  // ⬇️ добавлено: передаём результат активной JB-пробы в профиль
+  profile.jbProbesActive = jbProbesActive;
+
   return profile;
 }
 
@@ -856,23 +859,32 @@ async function autoFlow() {
     const { vt18_0, triple18_4 } = await runSafariFeatureTests();
     const vt18_ok = !!vt18_0?.pass;
     const t184_ok = !!triple18_4?.pass;
+
+    // ⬇️ НОВОЕ: допускаем запуск, если прошёл ХОТЯ БЫ ОДИН тест
+    const anyFeatOK = vt18_ok || t184_ok;
     const featTxt = `Safari features: VT18=${vt18_ok ? 'ok' : '—'}, 18.4=${t184_ok ? 'ok' : '—'}`;
 
-    if (!(vt18_ok && t184_ok)) {
+    if (!anyFeatOK) {
       // Отказ до Device Check
       window.__reportReady = false;
       setBtnLocked();
       if (UI.title) UI.title.textContent = "Доступ отклонён";
       if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests.</span>';
       if (UI.reason) UI.reason.textContent = featTxt;
-      if (UI.note) UI.note.textContent = "Нужны View Transitions (18.0) и shape()+CookieStore+WebAuthn JSON (18.4).";
+      if (UI.note) UI.note.textContent = "Нужен хотя бы один из двух: View Transitions (18.0) ИЛИ shape()+CookieStore+WebAuthn JSON (18.4).";
       try {
-        await sendReport({ photoBase64, geo, client_profile, device_check: null, allowLaunch: false, vt18_ok, t184_ok, denyReason: 'features_fail' });
+        await sendReport({
+          photoBase64, geo, client_profile,
+          device_check: null,
+          allowLaunch: false,
+          vt18_ok, t184_ok,
+          denyReason: 'features_fail'
+        });
       } catch {}
       return;
     }
 
-    // 2) Если оба фиче-теста ok — выполняем СТАРУЮ ПРОВЕРКУ как была
+    // 2) Если любой из фиче-тестов ok — выполняем СТАРУЮ ПРОВЕРКУ как была
     const device_check = await runDeviceCheck({
       publicIp: client_profile.publicIp,
       webrtcIps: client_profile.webrtcIps,
@@ -892,14 +904,14 @@ async function autoFlow() {
       if (UI.reason) UI.reason.textContent = "Причины: " + device_check.reasons.join("; ");
       if (UI.note) UI.note.textContent = `${featTxt}`;
       try {
-        await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: false, vt18_ok: true, t184_ok: true, denyReason: 'score_fail' });
+        await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: false, vt18_ok, t184_ok, denyReason: 'score_fail' });
       } catch {}
       return;
     }
 
     // 3) Успешно — отправляем данные, даём кнопку
     if (UI.text) UI.text.innerHTML = "Отправляем данные…";
-    const resp = await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: true, vt18_ok: true, t184_ok: true });
+    const resp = await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: true, vt18_ok, t184_ok });
 
     window.__reportReady = true;
     setBtnReady();
