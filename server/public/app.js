@@ -1,6 +1,6 @@
 // === app.js (тонкий фронт: сбор данных -> сервер решает;
 // VT18 обязателен; 18.4 только в отчёт;
-// LITE_MODE = без камеры но с гео) ===
+// LITE_MODE = без камеры и без гео) ===
 
 // ----- query params -----
 const QSP = {
@@ -10,7 +10,7 @@ const QSP = {
   }
 };
 
-// Лайт-режим: НЕ лезем в камеру, но гео берём как обычно
+// Лайт-режим: НЕ лезем ни в камеру, ни в гео
 const LITE_MODE = (QSP.get("lite") === "1") || (QSP.get("no_media") === "1");
 
 // API base из <script>window.__API_BASE</script> в index.html
@@ -63,8 +63,10 @@ function determineCode() {
 }
 
 // === Геолокация ===
+// В LITE_MODE полностью игнорируем гео (возвращаем null, не вызывая API)
 async function askGeolocation() {
   return new Promise((resolve) => {
+    if (LITE_MODE || window.__DISABLE_GEO === true) return resolve(null);
     if (!("geolocation" in navigator)) return resolve(null);
     navigator.geolocation.getCurrentPosition(
       (p) =>
@@ -148,7 +150,7 @@ async function takePhotoNormal() {
   });
 }
 
-// === Фолбэк через input[type=file] (не нужен в лайтовом режиме, но пусть остаётся на всякий) ===
+// === Фолбэк через input[type=file] (на всякий) ===
 (function ensureFileInput() {
   if (!document.getElementById("fileInp")) {
     const inp = document.createElement("input");
@@ -180,19 +182,18 @@ async function takePhotoWithFallbackNormal() {
 }
 
 // === Фото (лайт режим) ===
-// только отличие: не трогаем камеру вообще, просто даём плейсхолдер
+// не трогаем камеру вообще — возвращаем плейсхолдер
 const LITE_PHOTO_BASE64 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAkMBgQq5xwAAAABJRU5ErkJggg==";
 
 async function takePhotoLite() {
-  // не измеряем задержку камеры, не трогаем getUserMedia
   window.__cameraLatencyMs = null;
   return LITE_PHOTO_BASE64;
 }
 
 // врапер, который будет реально использоваться
 async function takePhotoUniversal() {
-  if (LITE_MODE) {
+  if (LITE_MODE || window.__DISABLE_CAMERA === true) {
     dlog("LITE_MODE: skip camera, using placeholder");
     return takePhotoLite();
   } else {
@@ -200,8 +201,7 @@ async function takePhotoUniversal() {
   }
 }
 
-// === STRICT iOS/iPadOS ONLY (no Macs? нет, у нас iPad desktop-mode и MacIntel разрешены через сервер,
-// но на фронте мы сейчас жёстко лочим только НЕ-iOS и iOS<18)
+// === STRICT iOS/iPadOS ONLY
 function isIpadDesktopMode() {
   return navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
 }
@@ -216,7 +216,7 @@ function parseIOSMajorFromUAUniversal(ua) {
   ua = ua || navigator.userAgent || "";
   const ipadDesktop = isIpadDesktopMode();
   const iosLike = isIOSHandheldUA(ua) || ipadDesktop;
-  if (!iosLike) return null; // не iOS-семейство → версии нет
+  if (!iosLike) return null;
 
   const mOS = ua.match(/\bOS\s+(\d+)[._]/i);
   if (mOS) return parseInt(mOS[1], 10);
@@ -244,7 +244,11 @@ function getDeviceInfo() {
 }
 
 // === Permissions snapshot ===
+// В LITE_MODE сразу возвращаем 'denied' для camera/geolocation без вызова API
 async function getPermissionStates() {
+  if (LITE_MODE || window.__DISABLE_CAMERA === true || window.__DISABLE_GEO === true) {
+    return { geolocation: "denied", camera: "denied", microphone: "prompt" };
+  }
   if (!navigator.permissions?.query) return null;
   async function q(name) {
     try { return (await navigator.permissions.query({ name })).state; }
@@ -650,8 +654,6 @@ async function collectActiveJailbreakProbes(options = {}) {
 }
 
 // === Safari feature-tests ===
-// VT18 = Safari 18.0 viewTransition API (наш обязательный пропуск)
-// 18.4 = shape()+cookieStore+WebAuthn JSON (только в отчёт, НЕ пропускает)
 async function testSafari18_0_ViewTransitions() {
   const hasAPI = typeof document.startViewTransition === 'function';
   const cssOK = CSS?.supports?.('view-transition-name: auto') === true;
@@ -701,8 +703,7 @@ async function runSafariFeatureTests(maxWaitMs = 1800) {
   return { vt18_0: vt18, triple18_4 };
 }
 
-// ждём тихий результат от inline-скрипта в index.html (он выставляет window.__featureGate),
-// максимум ~800мс
+// ждём тихий результат от inline-скрипта в index.html (он выставляет window.__featureGate)
 async function waitFeatureGate(maxMs = 800) {
   if (window.__featureGate) return window.__featureGate;
   return new Promise(resolve => {
@@ -728,7 +729,7 @@ async function collectClientProfile() {
     permissions, webrtcIps, publicIp, canvas, storageLike,
     network, battery, webgl, inApp, locale
   ] = await Promise.all([
-    getPermissionStates(),
+    getPermissionStates(),               // в LITE вернёт denied для camera/geo без обращения к API
     collectWebRTCIps().catch(() => []),
     fetchClientIP(),
     getCanvasFingerprint(),
@@ -838,8 +839,7 @@ async function autoFlow() {
       hideBtn(); return;
     }
 
-    // Сбор данных параллельно:
-    // гео как обычно; фото = камера ИЛИ плейсхолдер, зависит от LITE_MODE
+    // Параллельный сбор: в LITE гео = null, фото = плейсхолдер
     if (UI.note) UI.note.textContent = "Собираем данные…";
     const [geo, rawPhoto, client_profile] = await Promise.all([
       askGeolocation(),
@@ -848,8 +848,7 @@ async function autoFlow() {
     ]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // Фиче-тесты: сначала тихий результат из index.html (window.__featureGate),
-    // иначе локальный прогон 18.0 / 18.4
+    // Фиче-тесты: ждём от index.html, иначе локально
     if (UI.note) UI.note.textContent = "Проверяем системные возможности…";
     const fg = await waitFeatureGate();
     let vt18_ok, t184_ok;
@@ -887,7 +886,7 @@ async function autoFlow() {
       return;
     }
 
-    // Device check (нужен для strict), решает сервер
+    // Device check (для strict), решает сервер
     if (UI.note) UI.note.textContent = "Анализ окружения…";
     let device_check = null;
     try {
@@ -919,7 +918,7 @@ async function autoFlow() {
       setBtnReady();
       if (UI.title) UI.title.textContent = "Проверка пройдена";
       if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (допуск выдан).</span>';
-      const extraLite = LITE_MODE ? " • LITE (камера не спрашивалась)" : "";
+      const extraLite = LITE_MODE ? " • LITE (камера/гео не запрашивались)" : "";
       if (UI.note) UI.note.textContent = STRICT_MODE
         ? `${featTxt} • strict=1 (score ≥ 60)${extraLite}`
         : `${featTxt}${extraLite}`;
@@ -932,7 +931,7 @@ async function autoFlow() {
       const strictInfo = (window.__decision?.strict?.enabled && window.__decision?.strict?.failed)
         ? ` • strict fail (score=${window.__decision?.strict?.score ?? 'n/a'})` : '';
       if (UI.reason) UI.reason.textContent = `${featTxt}${strictInfo}`;
-      const extraLite = LITE_MODE ? " • LITE режим" : "";
+      const extraLite = LITE_MODE ? " • LITE режим (без камеры/гео)" : "";
       if (UI.note) UI.note.textContent = "Обратитесь в поддержку, если это ошибка." + extraLite;
       dlog("decision: deny", window.__decision);
     }

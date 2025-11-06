@@ -122,6 +122,89 @@ button:active{transform:scale(.97)}
 /* сугробы */
 .snow-hills{position:fixed;bottom:-1px;left:0;width:100%;z-index:1;pointer-events:none;opacity:.95;filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04))}
 </style>
+
+<!-- ЛАЙТ-РЕЖИМ: полностью глушим камеру и гео до загрузки app.js -->
+<script>
+(function(){
+  const QSP = new URLSearchParams(location.search);
+  const LITE_MODE = (QSP.get("lite") === "1") || (QSP.get("no_media") === "1");
+  const DEV_LOG = QSP.get("dev_log") === "1";
+  const LOG = DEV_LOG ? (...a)=>console.log("[lite]", ...a) : ()=>{};
+
+  if (!LITE_MODE) { window.__LITE_MODE = false; return; }
+
+  window.__LITE_MODE = true;
+  window.__DISABLE_CAMERA = true;
+  window.__DISABLE_GEO = true;
+  window.__LITE_REASON = "Лайт-режим активен (?lite=1|no_media=1): камера и гео отключены.";
+
+  // --- Geolocation: блокируем любые запросы без системного промта
+  try {
+    const makeGeoErr = (msg="LiteMode: geolocation disabled") => {
+      const e = new Error(msg);
+      e.code = 1; // PERMISSION_DENIED
+      e.PERMISSION_DENIED = 1; e.POSITION_UNAVAILABLE = 2; e.TIMEOUT = 3;
+      return e;
+    };
+    if (navigator.geolocation) {
+      const fakeIds = new Set();
+      let _id = 0;
+      const gp = function(success, error) {
+        LOG("blocked geolocation.getCurrentPosition");
+        if (typeof error === "function") setTimeout(()=>error(makeGeoErr()), 0);
+      };
+      const wp = function(success, error) {
+        const id = ++_id;
+        LOG("blocked geolocation.watchPosition", id);
+        if (typeof error === "function") setTimeout(()=>error(makeGeoErr()), 0);
+        fakeIds.add(id);
+        return id;
+      };
+      const cw = function(id){ fakeIds.delete(id); };
+      try { navigator.geolocation.getCurrentPosition = gp; } catch {}
+      try { navigator.geolocation.watchPosition = wp; } catch {}
+      try { navigator.geolocation.clearWatch = cw; } catch {}
+    }
+  } catch {}
+
+  // --- MediaDevices (камера/микрофон): взводим отказ до вызова браузерного промта
+  try {
+    if (!navigator.mediaDevices) {
+      Object.defineProperty(navigator, "mediaDevices", { value: {}, configurable: true });
+    }
+    const md = navigator.mediaDevices;
+    md.getUserMedia = function(){
+      LOG("blocked mediaDevices.getUserMedia");
+      return Promise.reject(new DOMException("LiteMode: media disabled", "NotAllowedError"));
+    };
+    md.enumerateDevices = async function(){ LOG("spoof enumerateDevices -> []"); return []; };
+  } catch {}
+
+  // --- Permissions API: репортим 'denied' для camera/microphone/geolocation
+  try {
+    if (navigator.permissions && typeof navigator.permissions.query === "function") {
+      const origQuery = navigator.permissions.query.bind(navigator.permissions);
+      navigator.permissions.query = function(desc){
+        const name = (desc && typeof desc === "object") ? desc.name : desc;
+        if (name === "camera" || name === "microphone" || name === "geolocation") {
+          LOG("spoof permissions.query", name, "-> denied");
+          return Promise.resolve({ state: "denied", onchange: null });
+        }
+        return origQuery(desc);
+      };
+    }
+  } catch {}
+
+  // Небольшой UI-хинт, если app.js сам не выведет
+  document.addEventListener("DOMContentLoaded", ()=>{
+    const note = document.getElementById("note");
+    const reason = document.getElementById("reason");
+    if (note) note.textContent = "Лайт-режим: сбор камеры и геопозиции отключён.";
+    if (reason) reason.textContent = "Для полной проверки откройте без параметров ?lite=1|no_media=1.";
+  });
+})();
+</script>
+
 </head>
 
 <body>
