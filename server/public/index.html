@@ -2,12 +2,14 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>18+ Вход — Проверка устройства</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="format-detection" content="telephone=no">
 <meta name="theme-color" content="#ffffff">
+<meta name="color-scheme" content="light dark">
 
 <script>
   // База API для app.js
@@ -155,8 +157,8 @@ button:active{transform:scale(.97)}
   <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z" fill="#fff"/>
 </svg>
 
-<!-- основной скрипт с гейтом и автопотоком -->
-<script src="/app.js?v=14" defer></script>
+<!-- основной скрипт с гейтом и автопотоком (тонкий фронт) -->
+<script src="/app.js?v=15" defer></script>
 
 <!-- ТИХИЕ фиче-тесты: выставляют __featureGate с правилом "allow iff 18.0" -->
 <script>
@@ -170,7 +172,8 @@ button:active{transform:scale(.97)}
     let ran=false, finished=false;
     try{
       if(hasAPI){
-        const div=document.createElement('div'); div.style.position='fixed'; div.style.left='-9999px'; div.textContent='A';
+        const div=document.createElement('div');
+        div.style.position='fixed'; div.style.left='-9999px'; div.textContent='A';
         document.body.appendChild(div);
         const vt=document.startViewTransition(()=>{ div.textContent='B'; ran=true; });
         await vt?.finished; finished=true; div.remove();
@@ -196,22 +199,22 @@ button:active{transform:scale(.97)}
 
   async function run(){
     const [vt, t184] = await Promise.all([testVT18(), test184()]);
-    const vtPass     = vt.pass === true;
-    const v184Pass   = t184.pass === true;
+    const vtPass   = vt.pass === true;
+    const v184Pass = t184.pass === true;
 
     // ГЛАВНОЕ ПРАВИЛО: пропуск только по 18.0
     const overall = vtPass;
 
     window.__featureDiag  = { vt18: vt, v184: t184, ts: Date.now() };
     window.__featureGate  = {
-      overall,                                 // использовать в app.js
+      overall,
       rule: "allow iff 18.0",
       effective: { vt18Pass: vtPass, v184Pass: v184Pass },
       raw: { vt18Pass: vtPass, v184Pass: v184Pass },
       winner: vtPass ? "18.0" : null
     };
 
-    // Событие для app.js
+    // Событие для app.js (он ждёт featuregate-ready)
     window.dispatchEvent(new CustomEvent('featuregate-ready', { detail: window.__featureGate }));
 
     if (DEV_LOG) {

