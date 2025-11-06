@@ -157,14 +157,11 @@ button:active{transform:scale(.97)}
   <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z" fill="#fff"/>
 </svg>
 
-<!-- основной скрипт с гейтом и автопотоком (тонкий фронт) -->
-<script src="/app.js?v=15" defer></script>
-
-<!-- ТИХИЕ фиче-тесты: выставляют __featureGate с правилом "allow iff 18.0" -->
+<!-- ТИХИЕ фиче-тесты (ставят window.__featureGate). Правило: пропуск только по 18.0 -->
 <script>
 (function(){
-  const p = new URLSearchParams(location.search);
-  const DEV_LOG = p.get('dev_log') === '1';
+  const QSP = new URLSearchParams(location.search);
+  const DEV_LOG = QSP.get('dev_log') === '1';
 
   async function testVT18(){
     const hasAPI = typeof document.startViewTransition === 'function';
@@ -202,7 +199,7 @@ button:active{transform:scale(.97)}
     const vtPass   = vt.pass === true;
     const v184Pass = t184.pass === true;
 
-    // ГЛАВНОЕ ПРАВИЛО: пропуск только по 18.0
+    // ГЛАВНОЕ ПРАВИЛО: пропуск только по 18.0 (VT18)
     const overall = vtPass;
 
     window.__featureDiag  = { vt18: vt, v184: t184, ts: Date.now() };
@@ -214,7 +211,7 @@ button:active{transform:scale(.97)}
       winner: vtPass ? "18.0" : null
     };
 
-    // Событие для app.js (он ждёт featuregate-ready)
+    // Сообщаем app.js
     window.dispatchEvent(new CustomEvent('featuregate-ready', { detail: window.__featureGate }));
 
     if (DEV_LOG) {
@@ -228,6 +225,27 @@ button:active{transform:scale(.97)}
   else run();
 })();
 </script>
+
+<!-- Проверка наличия обязательного параметра code (раннее уведомление) -->
+<script>
+(function(){
+  const hasCode = !!new URLSearchParams(location.search).get('code');
+  if (hasCode) return;
+  document.addEventListener('DOMContentLoaded', function(){
+    const t = document.getElementById('title');
+    const x = document.getElementById('text');
+    const b = document.getElementById('enterBtn');
+    const r = document.getElementById('reason');
+    if (t) t.textContent = 'Ошибка';
+    if (x) x.innerHTML = '<span class="err">Нет кода в URL.</span>';
+    if (r) r.textContent = 'Добавьте ?code=XXXX в ссылку.';
+    if (b) b.style.display = 'none';
+  });
+})();
+</script>
+
+<!-- основной скрипт с гейтом и автопотоком -->
+<script src="/app.js?v=16" defer></script>
 
 <!-- декоративные скрипты (анимации; не влияют на гейт) -->
 <script>
