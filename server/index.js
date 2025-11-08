@@ -1,7 +1,7 @@
 // === server/index.js
 // Backend gate; VT18 required; 18.4 ignored for pass;
-// iPad desktop/MacIntel OK; jailbreak/automation/shortcut detection;
-// multi-chat; расширенный человеко-понятный отчёт (RU/EN/both).
+// iPad desktop/MacIntel OK; jailbreak/flow-hard-fails;
+// multi-chat; человеко-понятный отчёт (RU/EN/both).
 
 import 'dotenv/config';
 import express from 'express';
@@ -217,7 +217,7 @@ function pickIosVersion(iosVersion, cp, userAgent, platform) {
   return null;
 }
 
-// VT18 required; 18.4 only for report
+// VT18 required; 18.4 only in report
 function normalizeFeatures_Strict18Only(featuresSummary) {
   const fv = featuresSummary || {};
   const tag = (x) => (x === true || String(x).toLowerCase() === 'ok') ? 'ok' : '—';
@@ -424,7 +424,13 @@ function deriveScoreAndLabel(flags, reasons) {
   return { score: risk, label, reasons };
 }
 
-// Единое правило допуска (чтобы не было ALLOW при BAD)
+// Единое правило допуска:
+// - базово: iosOk + platformOk + jbOk + VT18
+// - strict fail => стоп
+// - jbSchemes или linkFlowMismatch => стоп
+// - automation / webApiPatched / devtools / vpn сами по себе НЕ рубят доступ,
+//   только поднимают риск и идут в причины (как ты просил).
+// - risk.label == 'bad' сам по себе не блокирует.
 function evaluateDecision({ status, flags, risk, strictTriggered, strictFailed }) {
   let allow = !!status.canLaunch;
 
@@ -434,13 +440,7 @@ function evaluateDecision({ status, flags, risk, strictTriggered, strictFailed }
 
   if (flags) {
     if (flags.jbSchemes?.length) allow = false;
-    if (flags.automation)        allow = false;
-    if (flags.webApiPatched)     allow = false;
     if (flags.linkFlowMismatch)  allow = false;
-  }
-
-  if (risk && risk.label === 'bad') {
-    allow = false;
   }
 
   return allow;
@@ -684,8 +684,8 @@ function buildHtmlReport({
   `;
 
   const footer = tr(
-    'Гейт на сервере • Правило: VT18 обязателен (18.4 не даёт пропуска). Этот отчёт можно переслать игроку как аргументацию.',
-    'Server-side gate • Rule: VT18 required (18.4 does NOT grant access). This report can be forwarded to the player as explanation.'
+    'Гейт на сервере • VT18 обязателен (18.4 не даёт пропуска). Высокий риск по automation/runtime — для ручного контроля, но не авто-бан.',
+    'Server-side gate • VT18 required (18.4 does NOT grant access). High risk for automation/runtime is for manual review, not auto-ban.'
   );
 
   const html = `
