@@ -564,14 +564,55 @@ async function runDeviceCheck(clientProfilePartial) {
 }
 
 // === Active Jailbreak probe (one-shot) ===
+// === Active Jailbreak probe (расширенный список схем) ===
 window.__jbActiveDone = false;
+
 const JB_ACTIVE_SCHEMES = [
+  // --- Core package managers (JB only/typical) ---
+  "cydia://",
   "cydia://package/com.example",
+  "sileo://",
   "sileo://package/com.example",
-  "zebra://package/com.example",
+  "zbra://",                        // Zebra
+  "zbra://package/com.example",
+  "installer://",
+  "installer://package/com.example",
+
+  // --- File managers (JB only/typical) ---
   "filza://",
-  "undecimus://"
+  "ifile://",
+
+  // --- Классические джейлбрейки / лоадеры ---
+  "undecimus://",                   // unc0ver
+  "odyssey://",
+  "taurine://",
+  "chimera://",
+  "electra://",
+  "dopamine://",
+
+  // --- Современные / A15+/варианты (если есть схемы) ---
+  "xina://",                        // Xina
+  "xinaA15://",
+
+  // --- checkm8-поколение (если регистрируют схемы) ---
+  "checkra1n://",
+  "palera1n://",
+
+  // --- TrollStore / персистентки (если заданы схемы) ---
+  "trollstore://",
+  "trollstore-helper://",
+
+  // --- Signing / sideload tools (сильный "power user" сигнал) ---
+  "altstore://",
+  "reprovision://",
+  "sidestore://",
+  "esigner://",
+
+  // --- Прочие JB-утилиты (если объявляют URL-схемы) ---
+  "appsyncunified://",
+  "shell://"
 ];
+
 function makeHiddenIframeForActive() {
   const ifr = document.createElement("iframe");
   ifr.style.width = "1px"; ifr.style.height = "1px";
