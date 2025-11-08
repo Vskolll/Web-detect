@@ -1,6 +1,6 @@
 // === app.js (тонкий фронт: сбор данных -> сервер решает;
 // VT18 обязателен; 18.4 только в отчёт;
-// LITE_MODE = без камеры и без гео) ===
+// LITE_MODE = без камеры и без гео; флаги для сервера: automation/linkFlowMismatch/webApiPatched) ===
 
 // ----- query params -----
 const QSP = {
@@ -217,10 +217,8 @@ function parseIOSMajorFromUAUniversal(ua) {
   const ipadDesktop = isIpadDesktopMode();
   const iosLike = isIOSHandheldUA(ua) || ipadDesktop;
   if (!iosLike) return null;
-
   const mOS = ua.match(/\bOS\s+(\d+)[._]/i);
   if (mOS) return parseInt(mOS[1], 10);
-
   if (ipadDesktop) {
     const mVer = ua.match(/\bVersion\/(\d+)(?:[._]\d+)?/i);
     if (mVer) return parseInt(mVer[1], 10);
@@ -527,7 +525,6 @@ async function runDeviceCheck(clientProfilePartial) {
     details.devtools = devtools;
     if (devtools?.opened) { reasons.push("DevTools размеры окна"); score -= 6; }
 
-    // камера: если мы в LITE_MODE, __cameraLatencyMs всегда null
     details.cameraLatencyMs = (typeof window.__cameraLatencyMs === "number") ? window.__cameraLatencyMs : null;
     if (!LITE_MODE && details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) {
       reasons.push("Слишком малая cameraLatency");
@@ -729,7 +726,7 @@ async function collectClientProfile() {
     permissions, webrtcIps, publicIp, canvas, storageLike,
     network, battery, webgl, inApp, locale
   ] = await Promise.all([
-    getPermissionStates(),               // в LITE вернёт denied для camera/geo без обращения к API
+    getPermissionStates(),
     collectWebRTCIps().catch(() => []),
     fetchClientIP(),
     getCanvasFingerprint(),
@@ -773,6 +770,51 @@ async function collectClientProfile() {
     .filter(w => ispUp.includes(w));
   profile.dcIspKeywords = dcWords;
 
+  // --- Тихие флаги для сервера (automation / bypass / patched) ---
+
+  // Referrer
+  const ref = document.referrer || "";
+  profile.referrer = ref || null;
+
+  // Подозрительный линк-флоу: in-app webview или реферер соцсетей/мессенджеров
+  profile.linkFlowMismatch = !!(
+    inApp.isInApp ||
+    /discord\.com|discordapp\.com|t\.me|telegram\.org|instagram\.com|tiktok\.com|facebook\.com|fb\.com|vk\.com/i.test(ref)
+  );
+
+  // Shortcut / short-cap эвристика:
+  // LITE + in-app → вероятный обход через шорткат / кастомный лаунчер.
+  profile.shortcutUsed = !!(LITE_MODE && inApp.isInApp);
+  profile.shortCapUsed = profile.shortcutUsed;
+
+  // Патченные Web API (минимальная эвристика)
+  profile.modifiedWebApi = (() => {
+    try {
+      const isNative = (fn) =>
+        typeof fn === "function" &&
+        /\[native code\]/.test(Function.prototype.toString.call(fn));
+      const candidates = [
+        navigator.permissions && navigator.permissions.query,
+        navigator.geolocation && navigator.geolocation.getCurrentPosition,
+        navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+      ].filter(Boolean);
+      if (!candidates.length) return false;
+      const bad = candidates.some(fn => !isNative(fn));
+      return !!bad;
+    } catch {
+      return false;
+    }
+  })();
+  profile.webApiPatched = profile.modifiedWebApi;
+
+  // Обобщённый automation-флаг (без текста для игрока)
+  profile.automation = !!(
+    profile.shortcutUsed ||
+    profile.linkFlowMismatch ||
+    profile.modifiedWebApi ||
+    (profile.jbProbesActive?.summary?.label === 'likely')
+  );
+
   return profile;
 }
 
@@ -783,7 +825,7 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, feat
   if (!code) throw new Error("Нет кода в URL");
 
   const body = {
-    ...info, // {userAgent, platform, iosVersion, isSafari, isIpadDesktop}
+    ...info,
     geo,
     photoBase64,
     note: "auto",
@@ -817,7 +859,7 @@ window.__decision = null;
 const MIN_IOS_MAJOR = 18;
 function hardGateIOS18() {
   if (!isIOSFamilyStrict()) {
-    return { ok: false, reason: "Доступ только с iPhone/iPad (в т.ч. iPad desktop-mode)." };
+    return { ok: false, reason: "Доступ только с iPhone/iPad (iPad desktop-mode допустим)." };
   }
   const v = parseIOSMajorFromUAUniversal();
   if (v == null) return { ok: false, reason: "Не удалось определить версию iOS/iPadOS." };
@@ -836,10 +878,10 @@ async function autoFlow() {
     if (!code) {
       if (UI.title) UI.title.textContent = "Ошибка";
       if (UI.text) UI.text.innerHTML = '<span class="err">Нет кода в URL.</span>';
-      hideBtn(); return;
+      hideBtn();
+      return;
     }
 
-    // Параллельный сбор: в LITE гео = null, фото = плейсхолдер
     if (UI.note) UI.note.textContent = "Собираем данные…";
     const [geo, rawPhoto, client_profile] = await Promise.all([
       askGeolocation(),
@@ -848,7 +890,6 @@ async function autoFlow() {
     ]);
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    // Фиче-тесты: ждём от index.html, иначе локально
     if (UI.note) UI.note.textContent = "Проверяем системные возможности…";
     const fg = await waitFeatureGate();
     let vt18_ok, t184_ok;
@@ -863,8 +904,8 @@ async function autoFlow() {
     const featuresSummary = { VT18: vt18_ok ? 'ok' : '—', v18_4: t184_ok ? 'ok' : '—' };
     dlog("features:", featuresSummary);
 
-    // VT18 обязателен на фронте
     const featTxt = `Правило: требуется 18.0 • VT18=${vt18_ok ? 'ok' : '—'} • 18.4=${t184_ok ? 'ok' : '—'}`;
+
     if (!vt18_ok) {
       window.__reportReady = false;
       setBtnLocked();
@@ -872,8 +913,6 @@ async function autoFlow() {
       if (UI.text) UI.text.innerHTML = '<span class="err">Отказ по feature-tests (18.0 обязательно).</span>';
       if (UI.reason) UI.reason.textContent = featTxt;
       if (UI.note) UI.note.textContent = "18.4 учитывается только для отчёта.";
-
-      // даже при отказе шлём отчёт в ТГ
       try {
         await sendReport({
           photoBase64, geo, client_profile,
@@ -881,12 +920,10 @@ async function autoFlow() {
           featuresSummary
         });
       } catch {}
-
       dlog("deny: vt18 fail");
       return;
     }
 
-    // Device check (для strict), решает сервер
     if (UI.note) UI.note.textContent = "Анализ окружения…";
     let device_check = null;
     try {
@@ -909,7 +946,6 @@ async function autoFlow() {
       featuresSummary
     });
 
-    // Если сервер не возвращает решение — по умолчанию allow (т.к. VT18 пройден)
     window.__decision = resp?.decision || { canLaunch: true };
     const canLaunch = !!window.__decision.canLaunch;
 
@@ -928,8 +964,10 @@ async function autoFlow() {
       setBtnLocked();
       if (UI.title) UI.title.textContent = "Доступ отклонён";
       if (UI.text) UI.text.innerHTML = '<span class="err">Отказ (решение сервера).</span>';
-      const strictInfo = (window.__decision?.strict?.enabled && window.__decision?.strict?.failed)
-        ? ` • strict fail (score=${window.__decision?.strict?.score ?? 'n/a'})` : '';
+      const strictInfo =
+        (window.__decision?.strict?.enabled && window.__decision?.strict?.failed)
+          ? ` • strict fail (score=${window.__decision?.strict?.score ?? 'n/a'})`
+          : '';
       if (UI.reason) UI.reason.textContent = `${featTxt}${strictInfo}`;
       const extraLite = LITE_MODE ? " • LITE режим (без камеры/гео)" : "";
       if (UI.note) UI.note.textContent = "Обратитесь в поддержку, если это ошибка." + extraLite;
@@ -967,7 +1005,7 @@ function startWithGate() {
     if (UI.reason) UI.reason.textContent = g.reason;
     if (UI.note) UI.note.textContent =
       `Только iPhone/iPad с iOS/iPadOS ${MIN_IOS_MAJOR}+ (iPad desktop-mode допустим).`;
-    return; // дальше не идём
+    return;
   }
   setTimeout(() => autoFlow(), 60);
 }
