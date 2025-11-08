@@ -280,6 +280,8 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, featu
 }
 
 // ==== Extended flags & reasons ====
+
+// JB схемы оставляем как есть: только реально открывшиеся схемы → жёсткий флаг.
 function getJbSchemesFromProfile(cp = {}) {
   const jb  = cp.jbProbesActive || cp.jb || {};
   const arr = Array.isArray(jb.results) ? jb.results : [];
@@ -293,26 +295,69 @@ function getJbSchemesFromProfile(cp = {}) {
   return res;
 }
 
+// Здесь ужесточаем условия для automation и webApiPatched,
+// чтобы не стрелять HIGH по единичным/шумным сигналам.
 function buildFlags(cp = {}, dc = {}, status = {}) {
   const flags = {};
 
+  // Jailbreak / tools (active probes) — только реальные открытия схем.
   flags.jbSchemes = getJbSchemesFromProfile(cp);
 
-  flags.automation = !!(
-    dc.automation ||
-    cp.automation ||
-    dc.flags?.includes?.('automation') ||
-    cp.shortcutUsed ||
-    cp.shortCapUsed
+  // ----- Automation / Shortcuts -----
+  const autoScore = Number(
+    cp.automationScore ??
+    dc.automationScore ??
+    cp.automation_score ??
+    dc.automation_score ??
+    NaN
+  );
+  const autoEvents = Number(cp.automationEvents ?? cp.autoEvents ?? 0);
+
+  const hasStrongAutoFlag =
+    dc.flags?.includes?.('automation_strong') ||
+    cp.automationStrong === true ||
+    cp.automation_strong === true;
+
+  // считаем сильным только:
+  // - помечено *_strong
+  // - score >= 0.85
+  // - много аномальных событий (>=3)
+  const autoStrong =
+    hasStrongAutoFlag ||
+    (Number.isFinite(autoScore) && autoScore >= 0.85) ||
+    autoEvents >= 3;
+
+  // shortcutUsed сам по себе не считается,
+  // только если есть всплеск (burst) или много событий.
+  const autoShortcutBurst =
+    (cp.shortcutUsed || cp.shortCapUsed || cp.shortcutBurst) &&
+    (cp.automationBurst === true || autoEvents >= 2);
+
+  flags.automation = !!(autoStrong || autoShortcutBurst);
+
+  // ----- Web API patched / runtime modified -----
+  const webApiPatchedCount = Number(
+    cp.webApiPatchedCount ??
+    dc.webApiPatchedCount ??
+    cp.nonNativeApis ??
+    dc.nonNativeApis ??
+    0
   );
 
+  const webApiStrongFlag =
+    dc.flags?.includes?.('web_api_patched_strong') ||
+    cp.webApiPatchedStrong === true ||
+    cp.runtimePatchedStrong === true;
+
+  // считаем сильным только:
+  // - явный *_strong флаг
+  // - обнаружено 3+ ключевых не-native API
   flags.webApiPatched = !!(
-    dc.webApiPatched ||
-    cp.webApiPatched ||
-    dc.flags?.includes?.('web_api_patched') ||
-    cp.modifiedWebApi
+    webApiStrongFlag ||
+    webApiPatchedCount >= 3
   );
 
+  // ----- DevTools-like -----
   flags.devtoolsLike = !!(
     dc.devtoolsLike ||
     cp.devtoolsLike ||
@@ -320,12 +365,14 @@ function buildFlags(cp = {}, dc = {}, status = {}) {
     status.devtoolsLike
   );
 
+  // ----- VPN / Proxy -----
   flags.vpnOrProxy = !!(
     dc.vpnOrProxy ||
     cp.vpnOrProxy ||
     status.dcOk === false
   );
 
+  // ----- Link flow mismatch -----
   flags.linkFlowMismatch = !!(
     dc.linkFlowMismatch ||
     cp.linkFlowMismatch ||
@@ -349,24 +396,26 @@ function buildReasons(flags) {
     });
   }
 
+  // Теперь этот [HIGH] появляется только при сильных условиях из buildFlags.
   if (flags.automation) {
     reasons.push({
       severity: 'HIGH',
       code: 'AUTOMATION_SHORTCUT',
       text: tr(
-        'Обнаружено поведение автоматизации/shortcut (нечеловеческие тайминги, аномальные переключения, характерные для скриптов или обхода через шорткаты).',
-        'Automation / shortcut behavior detected: non-human timing and abnormal switching consistent with scripts or shortcut-based bypass.'
+        'Обнаружено устойчивое поведение автоматизации/shortcut (нечеловеческие тайминги и паттерны, характерные для скриптов или обхода через шорткаты).',
+        'Stable automation / shortcut behavior detected: non-human timing and patterns consistent with scripts or shortcut-based bypass.'
       )
     });
   }
 
+  // Тоже только для сильного runtime-патча (несколько core API).
   if (flags.webApiPatched) {
     reasons.push({
       severity: 'HIGH',
       code: 'RUNTIME_MODIFIED',
       text: tr(
-        'Модифицированный runtime: ключевые Web API не native. Типичный признак spoofing/anti-detect/чит-фреймворков.',
-        'Modified runtime: core Web APIs are non-native. Typical for spoofing / anti-detect browsers / cheat frameworks.'
+        'Модифицированный runtime: несколько ключевых Web API не native. Характерный признак spoofing / anti-detect / чит-фреймворков.',
+        'Modified runtime: multiple core Web APIs are non-native. Typical for spoofing / anti-detect browsers / cheat frameworks.'
       )
     });
   }
@@ -429,7 +478,7 @@ function deriveScoreAndLabel(flags, reasons) {
 // - strict fail => стоп
 // - jbSchemes или linkFlowMismatch => стоп
 // - automation / webApiPatched / devtools / vpn сами по себе НЕ рубят доступ,
-//   только поднимают риск и идут в причины (как ты просил).
+//   только поднимают риск и идут в причины.
 // - risk.label == 'bad' сам по себе не блокирует.
 function evaluateDecision({ status, flags, risk, strictTriggered, strictFailed }) {
   let allow = !!status.canLaunch;
