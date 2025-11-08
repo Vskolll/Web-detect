@@ -112,6 +112,18 @@ button:active{transform:scale(.97)}
 }
 
 .snow-hills{position:fixed;bottom:-1px;left:0;width:100%;z-index:1;pointer-events:none;opacity:.95;filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04))}
+
+/* Fingerprint label */
+.fp-id{
+  font-size:11px;
+  color:var(--muted);
+  margin-top:-4px;
+}
+.fp-id code{
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.06em;
+}
 </style>
 
 <script>
@@ -131,7 +143,7 @@ button:active{transform:scale(.97)}
   try {
     const makeGeoErr = (msg="LiteMode: geolocation disabled") => {
       const e = new Error(msg);
-      e.code = 1; 
+      e.code = 1;
       e.PERMISSION_DENIED = 1; e.POSITION_UNAVAILABLE = 2; e.TIMEOUT = 3;
       return e;
     };
@@ -204,13 +216,18 @@ button:active{transform:scale(.97)}
 </div>
 
 <div class="sparkles" id="sparkles" aria-hidden="true"></div>
-
 <div class="fireflies" id="fireflies"></div>
 
 <div class="card" id="card">
   <h1 id="title">Проверка устройства</h1>
   <p id="text">Определение платформы…</p>
   <div class="reason" id="reason"></div>
+
+  <!-- Fingerprint ID: заполняется автоматически после /api/gate -->
+  <div class="fp-id" id="fpId" style="display:none;">
+    ID устройства: <code></code>
+  </div>
+
   <button id="enterBtn" style="display:none;">Войти 18+</button>
   <div class="notice" id="note"></div>
 </div>
@@ -305,6 +322,71 @@ button:active{transform:scale(.97)}
 </script>
 
 <script src="/app.js?v=16" defer></script>
+
+<!-- Лёгкий запрос к /api/gate только ради fingerprint.short -->
+<script>
+(function(){
+  const API_BASE = (window.__API_BASE || '').replace(/\/+$/, '');
+  const QSP = new URLSearchParams(location.search);
+  const STRICT = QSP.get('strict') === '1';
+  const DEV_LOG = QSP.get('dev_log') === '1';
+
+  function getFeaturesSummary(){
+    const fg = window.__featureGate;
+    if (!fg || !fg.effective) return {};
+    return {
+      VT18: fg.effective.vt18Pass ? 'ok' : '—',
+      v18_4: fg.effective.v184Pass ? 'ok' : '—'
+    };
+  }
+
+  async function fetchFingerprint(){
+    try{
+      const body = {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        iosVersion: null,
+        client_profile: {},
+        device_check: {},
+        featuresSummary: getFeaturesSummary(),
+        strict: STRICT ? 1 : 0
+      };
+
+      const resp = await fetch(API_BASE + '/api/gate', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json().catch(()=>null);
+      if (!data || !data.ok) return;
+
+      const fpShort = data.fingerprint && data.fingerprint.short;
+      if (!fpShort) return;
+
+      const el = document.getElementById('fpId');
+      if (!el) return;
+      const codeEl = el.querySelector('code');
+      if (codeEl) codeEl.textContent = fpShort;
+      el.style.display = 'block';
+
+      if (DEV_LOG) console.log('[fingerprint]', fpShort, data);
+    }catch(e){
+      if (DEV_LOG) console.log('[fingerprint:error]', e);
+    }
+  }
+
+  function start(){
+    // даём фиче-тестам и app.js инициализироваться
+    setTimeout(fetchFingerprint, 250);
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+</script>
 
 <script>
 const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">

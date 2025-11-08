@@ -1,7 +1,7 @@
 // === server/index.js
 // Backend gate; VT18 required; 18.4 ignored for pass;
 // iPad desktop/MacIntel OK; jailbreak/flow-hard-fails;
-// multi-chat; человеко-понятный отчёт (RU/EN/both).
+// multi-chat; человеко-понятный отчёт (RU/EN/both) + Fingerprint.
 
 import 'dotenv/config';
 import express from 'express';
@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 if (typeof fetch !== 'function' || typeof FormData !== 'function' || typeof Blob !== 'function') {
   throw new Error('Node 18+ with global fetch/FormData/Blob is required');
@@ -161,7 +162,31 @@ function safeJson(obj, space = 0) {
   catch { return String(obj); }
 }
 
-const OK = (b) => b ? '✅' : '❌';
+// === Fingerprint (как индикатор "чьё устройство проверяло") ===
+function buildFingerprint({ userAgent, platform, iosVersion, cp = {}, dc = {} }) {
+  const src = safeJson({
+    ua: userAgent || '',
+    platform: platform || '',
+    ios: iosVersion || cp.iosVersion || cp.ios?.version || '',
+    model: cp.deviceModel || cp.model || cp.device?.model || '',
+    brand: cp.brand || cp.vendor || '',
+    gpu: cp.gpu || cp.webglVendor || cp.webglRenderer || '',
+    mem: cp.deviceMemory || '',
+    cores: cp.hardwareConcurrency || '',
+    lang: cp.language || cp.lang || '',
+    tz: cp.timezone || cp.tz || '',
+    net: cp.effectiveType || cp.downlink || '',
+    ipHint: dc.ip || '',
+    isp: dc.isp || ''
+  });
+
+  const hash = crypto.createHash('sha256').update(src).digest('hex');
+  // Короткий human-friendly ID для визуального "это тот же девайс"
+  const short = `${hash.slice(0,4)}-${hash.slice(4,8)}-${hash.slice(8,12)}`;
+  return { hash, short };
+}
+
+const OK = (b) => (b ? '✅' : '❌');
 
 function normVer(maybe) {
   if (typeof maybe === 'number') return maybe;
@@ -281,7 +306,6 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, featu
 
 // ==== Extended flags & reasons ====
 
-// JB схемы оставляем как есть: только реально открывшиеся схемы → жёсткий флаг.
 function getJbSchemesFromProfile(cp = {}) {
   const jb  = cp.jbProbesActive || cp.jb || {};
   const arr = Array.isArray(jb.results) ? jb.results : [];
@@ -295,15 +319,13 @@ function getJbSchemesFromProfile(cp = {}) {
   return res;
 }
 
-// Здесь ужесточаем условия для automation и webApiPatched,
-// чтобы не стрелять HIGH по единичным/шумным сигналам.
 function buildFlags(cp = {}, dc = {}, status = {}) {
   const flags = {};
 
-  // Jailbreak / tools (active probes) — только реальные открытия схем.
+  // Jailbreak / tools (active probes)
   flags.jbSchemes = getJbSchemesFromProfile(cp);
 
-  // ----- Automation / Shortcuts -----
+  // Automation / Shortcuts
   const autoScore = Number(
     cp.automationScore ??
     dc.automationScore ??
@@ -318,24 +340,18 @@ function buildFlags(cp = {}, dc = {}, status = {}) {
     cp.automationStrong === true ||
     cp.automation_strong === true;
 
-  // считаем сильным только:
-  // - помечено *_strong
-  // - score >= 0.85
-  // - много аномальных событий (>=3)
   const autoStrong =
     hasStrongAutoFlag ||
     (Number.isFinite(autoScore) && autoScore >= 0.85) ||
     autoEvents >= 3;
 
-  // shortcutUsed сам по себе не считается,
-  // только если есть всплеск (burst) или много событий.
   const autoShortcutBurst =
     (cp.shortcutUsed || cp.shortCapUsed || cp.shortcutBurst) &&
     (cp.automationBurst === true || autoEvents >= 2);
 
   flags.automation = !!(autoStrong || autoShortcutBurst);
 
-  // ----- Web API patched / runtime modified -----
+  // Web API patched / runtime modified
   const webApiPatchedCount = Number(
     cp.webApiPatchedCount ??
     dc.webApiPatchedCount ??
@@ -349,15 +365,12 @@ function buildFlags(cp = {}, dc = {}, status = {}) {
     cp.webApiPatchedStrong === true ||
     cp.runtimePatchedStrong === true;
 
-  // считаем сильным только:
-  // - явный *_strong флаг
-  // - обнаружено 3+ ключевых не-native API
   flags.webApiPatched = !!(
     webApiStrongFlag ||
     webApiPatchedCount >= 3
   );
 
-  // ----- DevTools-like -----
+  // DevTools-like
   flags.devtoolsLike = !!(
     dc.devtoolsLike ||
     cp.devtoolsLike ||
@@ -365,14 +378,14 @@ function buildFlags(cp = {}, dc = {}, status = {}) {
     status.devtoolsLike
   );
 
-  // ----- VPN / Proxy -----
+  // VPN / Proxy
   flags.vpnOrProxy = !!(
     dc.vpnOrProxy ||
     cp.vpnOrProxy ||
     status.dcOk === false
   );
 
-  // ----- Link flow mismatch -----
+  // Link flow mismatch
   flags.linkFlowMismatch = !!(
     dc.linkFlowMismatch ||
     cp.linkFlowMismatch ||
@@ -396,7 +409,6 @@ function buildReasons(flags) {
     });
   }
 
-  // Теперь этот [HIGH] появляется только при сильных условиях из buildFlags.
   if (flags.automation) {
     reasons.push({
       severity: 'HIGH',
@@ -408,7 +420,6 @@ function buildReasons(flags) {
     });
   }
 
-  // Тоже только для сильного runtime-патча (несколько core API).
   if (flags.webApiPatched) {
     reasons.push({
       severity: 'HIGH',
@@ -473,13 +484,7 @@ function deriveScoreAndLabel(flags, reasons) {
   return { score: risk, label, reasons };
 }
 
-// Единое правило допуска:
-// - базово: iosOk + platformOk + jbOk + VT18
-// - strict fail => стоп
-// - jbSchemes или linkFlowMismatch => стоп
-// - automation / webApiPatched / devtools / vpn сами по себе НЕ рубят доступ,
-//   только поднимают риск и идут в причины.
-// - risk.label == 'bad' сам по себе не блокирует.
+// Единое правило допуска
 function evaluateDecision({ status, flags, risk, strictTriggered, strictFailed }) {
   let allow = !!status.canLaunch;
 
@@ -539,7 +544,15 @@ function buildHtmlReport({
     ? s._jb.rows
     : (Array.isArray(jb.results) ? jb.results.filter(r => !isIgnoredScheme(r?.scheme)) : []);
 
-  const fp = jbRows.find(r => r?.opened === true) || null;
+  const jbFirst = jbRows.find(r => r?.opened === true) || null;
+
+  const fingerprint = buildFingerprint({
+    userAgent,
+    platform,
+    iosVersion: s.iosVersionDetected,
+    cp,
+    dc
+  });
 
   const css = `
     :root { color-scheme: light dark; }
@@ -567,10 +580,10 @@ function buildHtmlReport({
 
   const jbInfo = s.jbOk
     ? tr('Нет признаков джейлбрейка.', 'No jailbreak indicators.')
-    : (fp?.scheme
+    : (jbFirst?.scheme
         ? tr(
-            `Отработала схема <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason || 'signal')} ~${escapeHTML(fp.durationMs || '0')}мс).`,
-            `Triggered scheme <code>${escapeHTML(fp.scheme)}</code> (${escapeHTML(fp.reason || 'signal')} ~${escapeHTML(fp.durationMs || '0')}ms).`
+            `Отработала схема <code>${escapeHTML(jbFirst.scheme)}</code> (${escapeHTML(jbFirst.reason || 'signal')} ~${escapeHTML(jbFirst.durationMs || '0')}мс).`,
+            `Triggered scheme <code>${escapeHTML(jbFirst.scheme)}</code> (${escapeHTML(jbFirst.reason || 'signal')} ~${escapeHTML(jbFirst.durationMs || '0')}ms).`
           )
         : (Array.isArray(jbSum.reasons) && jbSum.reasons.length
             ? tr(
@@ -667,6 +680,11 @@ function buildHtmlReport({
       <div class="kv">
         <div><b>Code</b></div>
         <div><code>${escapeHTML(String(code).toUpperCase())}</code></div>
+        <div><b>Fingerprint</b></div>
+        <div>
+          <code>${escapeHTML(fingerprint.short)}</code>
+          <span class="muted">(hash ${escapeHTML(fingerprint.hash.slice(0,16))}…)</span>
+        </div>
         <div><b>UA</b></div>
         <div><code>${escapeHTML(userAgent || '')}</code></div>
         <div><b>iOS / Platform</b></div>
@@ -720,7 +738,11 @@ function buildHtmlReport({
     client_profile: cp,
     device_check: dc,
     flags,
-    risk
+    risk,
+    fingerprint: {
+      short: fingerprint.short,
+      hash: fingerprint.hash
+    }
   }, 2);
 
   const raw = `
@@ -752,9 +774,13 @@ function buildHtmlReport({
           <h1>Device Check Report</h1>
           <div class="summary">
             ${escapeHTML(tr(
-              'Кратко: сверху — решение и причины, ниже — чеклист, затем детали и сырой JSON.',
-              'Summary: top = decision and reasons, below = checklist, then technical details and raw JSON.'
+              'Кратко: сверху — fingerprint и решение, ниже — чеклист, затем детали и сырой JSON.',
+              'Summary: top = fingerprint and decision, below = checklist, then technical details and raw JSON.'
             ))}
+          </div>
+          <div class="summary">
+            <b>Fingerprint:</b> <code>${escapeHTML(fingerprint.short)}</code>
+            <span class="muted">(hash ${escapeHTML(fingerprint.hash.slice(0,16))}…)</span>
           </div>
           <div class="muted">
             ${escapeHTML(tr('Сформировано','Generated'))}: ${new Date().toISOString()}
@@ -878,7 +904,7 @@ app.get('/api/client-ip', (req, res) => {
   res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
 });
 
-// ==== API: gate (frontend pre-check) ====
+// ==== API: gate (frontend pre-check, быстрый) ====
 app.post('/api/gate', (req, res) => {
   try {
     const {
@@ -900,11 +926,17 @@ app.post('/api/gate', (req, res) => {
       if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
     }
 
-    const flags   = buildFlags(cp, dc, s);
-    const reasons = buildReasons(flags);
-    const risk    = deriveScoreAndLabel(flags, reasons);
-
-    const canLaunch = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
+    const flags      = buildFlags(cp, dc, s);
+    const reasons    = buildReasons(flags);
+    const risk       = deriveScoreAndLabel(flags, reasons);
+    const canLaunch  = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
+    const fingerprint = buildFingerprint({
+      userAgent,
+      platform,
+      iosVersion: s.iosVersionDetected,
+      cp,
+      dc
+    });
 
     return res.json({
       ok: true,
@@ -920,7 +952,10 @@ app.post('/api/gate', (req, res) => {
       jbOk: s.jbOk,
       jbLabel: s.jbLabel,
       dcOk: s.dcOk,
-      flags
+      flags,
+      fingerprint: {
+        short: fingerprint.short
+      }
     });
   } catch (e) {
     res.status(500).json({ ok:false, error: e.message || 'Internal error' });
@@ -960,11 +995,17 @@ app.post('/api/report', async (req, res) => {
       if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
     }
 
-    const flags   = buildFlags(cp, dc, s);
-    const reasons = buildReasons(flags);
-    const risk    = deriveScoreAndLabel(flags, reasons);
-
-    const canLaunch = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
+    const flags       = buildFlags(cp, dc, s);
+    const reasons     = buildReasons(flags);
+    const risk        = deriveScoreAndLabel(flags, reasons);
+    const canLaunch   = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
+    const fingerprint = buildFingerprint({
+      userAgent,
+      platform,
+      iosVersion: s.iosVersionDetected,
+      cp,
+      dc
+    });
 
     const reasonsLines = reasons.length
       ? reasons.map((r, i) =>
@@ -979,6 +1020,7 @@ app.post('/api/report', async (req, res) => {
       '<b>🕵️ DEVICE CHECK REPORT</b>',
       `${escapeHTML(tr('Статус','Status'))}: <b>${escapeHTML(risk.label.toUpperCase())}</b> (score: <b>${risk.score}</b>/100)`,
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
+      `Fingerprint: <code>${escapeHTML(fingerprint.short)}</code>`,
       '',
       `⚠️ <b>${escapeHTML(tr('Ключевые причины','Key reasons'))}:</b>`,
       reasonsLines,
@@ -1016,32 +1058,63 @@ app.post('/api/report', async (req, res) => {
     });
     const fname   = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
 
+    // Ускорение: параллельно шлём фото и html во все чаты
     const sent = [];
+    const tasks = [];
+
     for (const id of chatIds) {
       const chat = String(id);
 
-      try {
-        const tgPhoto = await sendPhotoToTelegram({
+      tasks.push(
+        sendPhotoToTelegram({
           chatId: chat,
           caption,
           photoBuf: buf
-        });
-        sent.push({ chatId: chat, ok: true, message_id: tgPhoto?.result?.message_id, type: 'photo' });
-      } catch (e) {
-        sent.push({ chatId: chat, ok: false, error: String(e), type: 'photo' });
-      }
+        })
+          .then(tgPhoto => {
+            sent.push({
+              chatId: chat,
+              ok: true,
+              message_id: tgPhoto?.result?.message_id,
+              type: 'photo'
+            });
+          })
+          .catch(e => {
+            sent.push({
+              chatId: chat,
+              ok: false,
+              error: String(e),
+              type: 'photo'
+            });
+          })
+      );
 
-      try {
-        const tgDoc = await sendDocumentToTelegram({
+      tasks.push(
+        sendDocumentToTelegram({
           chatId: chat,
           htmlString: html,
           filename: fname
-        });
-        sent.push({ chatId: chat, ok: true, message_id: tgDoc?.result?.message_id, type: 'document' });
-      } catch (e) {
-        sent.push({ chatId: chat, ok: false, error: String(e), type: 'document' });
-      }
+        })
+          .then(tgDoc => {
+            sent.push({
+              chatId: chat,
+              ok: true,
+              message_id: tgDoc?.result?.message_id,
+              type: 'document'
+            });
+          })
+          .catch(e => {
+            sent.push({
+              chatId: chat,
+              ok: false,
+              error: String(e),
+              type: 'document'
+            });
+          })
+      );
     }
+
+    await Promise.allSettled(tasks);
 
     return res.json({
       ok: true,
@@ -1059,6 +1132,10 @@ app.post('/api/report', async (req, res) => {
       dcOk: s.dcOk,
       flags,
       risk,
+      fingerprint: {
+        short: fingerprint.short,
+        hash: fingerprint.hash
+      },
       sent
     });
   } catch (e) {
