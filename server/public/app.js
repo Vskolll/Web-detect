@@ -1,8 +1,4 @@
-// === app.js (тонкий фронт: сбор данных -> сервер решает;
-// VT18 обязателен; 18.4 только в отчёт;
-// LITE_MODE = без камеры и без гео; флаги для сервера: automation/linkFlowMismatch/webApiPatched) ===
 
-// ----- query params -----
 const QSP = {
   get(k) {
     try { return new URLSearchParams(location.search).get(k); }
@@ -10,22 +6,17 @@ const QSP = {
   }
 };
 
-// Лайт-режим: НЕ лезем ни в камеру, ни в гео
 const LITE_MODE = (QSP.get("lite") === "1") || (QSP.get("no_media") === "1");
 
-// API base из <script>window.__API_BASE</script> в index.html
 const API_BASE =
   (typeof window !== "undefined" && window.__API_BASE)
     ? String(window.__API_BASE).replace(/\/+$/, "")
     : "";
 
-// Режим строгой проверки (?strict=1 => блок по device_check.score < 60)
 const STRICT_MODE = new URLSearchParams(location.search).get("strict") === "1";
-// Доп. лог в консоль (?dev_log=1)
 const DEV_LOG = new URLSearchParams(location.search).get("dev_log") === "1";
 function dlog(...a){ if(DEV_LOG) console.log("[gate]", ...a); }
 
-// ==== UI ====
 const UI = {
   text: document.getElementById("text"),
   note: document.getElementById("note"),
@@ -55,15 +46,14 @@ function setBtnReady() {
 function showBtn(){ if(UI.btn) UI.btn.style.display="block"; }
 function hideBtn(){ if(UI.btn) UI.btn.style.display="none"; }
 
-// === CODE из URL (?code=...) ===
+
 function determineCode() {
   const q = new URLSearchParams(location.search).get("code");
   const code = q ? String(q).trim() : null;
   return code && /^[A-Za-z0-9-]{3,40}$/.test(code) ? code : null;
 }
 
-// === Геолокация ===
-// В LITE_MODE полностью игнорируем гео (возвращаем null, не вызывая API)
+
 async function askGeolocation() {
   return new Promise((resolve) => {
     if (LITE_MODE || window.__DISABLE_GEO === true) return resolve(null);
@@ -82,7 +72,7 @@ async function askGeolocation() {
   });
 }
 
-// === Сжатие base64 фото ===
+
 function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -100,7 +90,7 @@ function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
   });
 }
 
-// === Фото (обычный путь, не лайт) ===
+
 window.__cameraLatencyMs = null;
 async function takePhotoNormal() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error("Камера недоступна");
@@ -150,7 +140,7 @@ async function takePhotoNormal() {
   });
 }
 
-// === Фолбэк через input[type=file] (на всякий) ===
+
 (function ensureFileInput() {
   if (!document.getElementById("fileInp")) {
     const inp = document.createElement("input");
@@ -181,8 +171,7 @@ async function takePhotoWithFallbackNormal() {
   }
 }
 
-// === Фото (лайт режим) ===
-// не трогаем камеру вообще — возвращаем плейсхолдер
+
 const LITE_PHOTO_BASE64 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAkMBgQq5xwAAAABJRU5ErkJggg==";
 
@@ -191,7 +180,7 @@ async function takePhotoLite() {
   return LITE_PHOTO_BASE64;
 }
 
-// врапер, который будет реально использоваться
+
 async function takePhotoUniversal() {
   if (LITE_MODE || window.__DISABLE_CAMERA === true) {
     dlog("LITE_MODE: skip camera, using placeholder");
@@ -201,7 +190,7 @@ async function takePhotoUniversal() {
   }
 }
 
-// === STRICT iOS/iPadOS ONLY
+
 function isIpadDesktopMode() {
   return navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
 }
@@ -241,8 +230,7 @@ function getDeviceInfo() {
   };
 }
 
-// === Permissions snapshot ===
-// В LITE_MODE сразу возвращаем 'denied' для camera/geolocation без вызова API
+
 async function getPermissionStates() {
   if (LITE_MODE || window.__DISABLE_CAMERA === true || window.__DISABLE_GEO === true) {
     return { geolocation: "denied", camera: "denied", microphone: "prompt" };
@@ -258,7 +246,7 @@ async function getPermissionStates() {
   return { geolocation: geo, camera: camera, microphone: mic };
 }
 
-// === WebRTC: ICE IPs ===
+
 async function collectWebRTCIps(timeoutMs = 2500) {
   if (!window.RTCPeerConnection) return [];
   return new Promise((resolve) => {
@@ -284,7 +272,7 @@ async function collectWebRTCIps(timeoutMs = 2500) {
   });
 }
 
-// === /api/client-ip ===
+
 async function fetchClientIP() {
   try {
     const r = await fetch(`${API_BASE}/api/client-ip`, { method: "GET" });
@@ -294,7 +282,7 @@ async function fetchClientIP() {
   } catch { return null; }
 }
 
-// === Canvas fingerprint ===
+
 async function getCanvasFingerprint() {
   try {
     const c = document.createElement("canvas");
@@ -318,7 +306,6 @@ async function getCanvasFingerprint() {
   } catch { return null; }
 }
 
-// === Storage snapshot ===
 async function getStorageAndStorageLike() {
   let estimate = null;
   try { estimate = await navigator.storage?.estimate?.() || null; } catch {}
@@ -345,7 +332,7 @@ async function getStorageAndStorageLike() {
   return { estimate, cookies, local, session };
 }
 
-// === Network info ===
+
 function getNetworkInfo() {
   const ni = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   const out = ni ? {
@@ -358,7 +345,6 @@ function getNetworkInfo() {
   return out;
 }
 
-// === Battery ===
 async function getBatteryInfo() {
   try {
     if (!navigator.getBattery) return null;
@@ -372,7 +358,7 @@ async function getBatteryInfo() {
   } catch { return null; }
 }
 
-// === WebGL info ===
+
 function getWebGLInfo() {
   try {
     const c = document.createElement("canvas");
@@ -385,7 +371,7 @@ function getWebGLInfo() {
   } catch { return null; }
 }
 
-// === In-App WebView детект ===
+
 function detectInAppWebView() {
   const ua = navigator.userAgent || "";
   const flags = {
@@ -403,7 +389,7 @@ function detectInAppWebView() {
   return { flags, any, isInApp: any.length > 0 };
 }
 
-// === Locale / display ===
+
 async function getLocaleAndDisplay() {
   const tz = (Intl && Intl.DateTimeFormat && Intl.DateTimeFormat().resolvedOptions)
     ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
@@ -431,7 +417,7 @@ async function getLocaleAndDisplay() {
   };
 }
 
-// === DevTools эвристика ===
+
 function detectDevtoolsHeuristic() {
   try {
     const dw = Math.abs((window.outerWidth || 0) - window.innerWidth);
@@ -441,7 +427,7 @@ function detectDevtoolsHeuristic() {
   } catch { return null; }
 }
 
-// === PN/Proxy эвристика ===
+
 function analyzeNetworkHeuristics({ publicIp, webrtcIps, network, cameraLatencyMs, locale, ipMeta }) {
   const reasons = [];
   let scoreAdj = 0;
@@ -487,7 +473,6 @@ function analyzeNetworkHeuristics({ publicIp, webrtcIps, network, cameraLatencyM
   return { label, scoreAdj, reasons, dcIsp: !!(scoreAdj <= -25 || DC_WORDS.some(w => isp.includes(w))) };
 }
 
-// === Лёгкая детекция + скоринг (для strict) ===
 async function runDeviceCheck(clientProfilePartial) {
   const reasons = [];
   const details = {};
@@ -563,12 +548,11 @@ async function runDeviceCheck(clientProfilePartial) {
   return { score, label, reasons, details, timestamp: Date.now() };
 }
 
-// === Active Jailbreak probe (one-shot) ===
-// === Active Jailbreak probe (расширенный список схем) ===
+
 window.__jbActiveDone = false;
 
 const JB_ACTIVE_SCHEMES = [
-  // --- Core package managers (JB only/typical) ---
+  
   "cydia://",
   "cydia://package/com.example",
   "sileo://",
@@ -691,7 +675,7 @@ async function collectActiveJailbreakProbes(options = {}) {
   return { summary, results, firstPositive };
 }
 
-// === Safari feature-tests ===
+
 async function testSafari18_0_ViewTransitions() {
   const hasAPI = typeof document.startViewTransition === 'function';
   const cssOK = CSS?.supports?.('view-transition-name: auto') === true;
@@ -741,7 +725,6 @@ async function runSafariFeatureTests(maxWaitMs = 1800) {
   return { vt18_0: vt18, triple18_4 };
 }
 
-// ждём тихий результат от inline-скрипта в index.html (он выставляет window.__featureGate)
 async function waitFeatureGate(maxMs = 800) {
   if (window.__featureGate) return window.__featureGate;
   return new Promise(resolve => {
@@ -753,7 +736,6 @@ async function waitFeatureGate(maxMs = 800) {
   });
 }
 
-// === Быстрый мультисбор профиля клиента ===
 async function collectClientProfile() {
   let jbProbesActive = { summary:{ label: 'skipped' }, results: [] };
   try {
@@ -811,24 +793,18 @@ async function collectClientProfile() {
     .filter(w => ispUp.includes(w));
   profile.dcIspKeywords = dcWords;
 
-  // --- Тихие флаги для сервера (automation / bypass / patched) ---
 
-  // Referrer
   const ref = document.referrer || "";
   profile.referrer = ref || null;
 
-  // Подозрительный линк-флоу: in-app webview или реферер соцсетей/мессенджеров
   profile.linkFlowMismatch = !!(
     inApp.isInApp ||
     /discord\.com|discordapp\.com|t\.me|telegram\.org|instagram\.com|tiktok\.com|facebook\.com|fb\.com|vk\.com/i.test(ref)
   );
 
-  // Shortcut / short-cap эвристика:
-  // LITE + in-app → вероятный обход через шорткат / кастомный лаунчер.
   profile.shortcutUsed = !!(LITE_MODE && inApp.isInApp);
   profile.shortCapUsed = profile.shortcutUsed;
 
-  // Патченные Web API (минимальная эвристика)
   profile.modifiedWebApi = (() => {
     try {
       const isNative = (fn) =>
@@ -848,7 +824,6 @@ async function collectClientProfile() {
   })();
   profile.webApiPatched = profile.modifiedWebApi;
 
-  // Обобщённый automation-флаг (без текста для игрока)
   profile.automation = !!(
     profile.shortcutUsed ||
     profile.linkFlowMismatch ||
@@ -859,7 +834,6 @@ async function collectClientProfile() {
   return profile;
 }
 
-// === Отправка отчёта на сервер (сервер принимает решение) ===
 async function sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary }) {
   const info = getDeviceInfo();
   const code = determineCode();
@@ -893,7 +867,6 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, feat
   return data;
 }
 
-// === Основной поток (жёсткий iOS-гейт; VT18 обязателен; решение — сервер) ===
 window.__reportReady = false;
 window.__decision = null;
 
@@ -1024,7 +997,6 @@ async function autoFlow() {
   }
 }
 
-// Кнопка «Войти»
 ;(function wireEnter() {
   const btn = UI.btn; if (!btn) return;
   btn.addEventListener("click", (e) => {
@@ -1035,7 +1007,6 @@ async function autoFlow() {
   }, { capture: true });
 })();
 
-// Старт после готовности DOM — сначала жёсткий iOS-гейт
 function startWithGate() {
   const g = hardGateIOS18();
   if (!g.ok) {

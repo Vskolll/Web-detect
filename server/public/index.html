@@ -12,7 +12,6 @@
 <meta name="color-scheme" content="light dark">
 
 <script>
-  // База API для app.js
   window.__API_BASE = (typeof location !== 'undefined' && location.origin)
     ? location.origin.replace(/\/+$/, '')
     : '';
@@ -27,7 +26,6 @@
   --gold-h:47;
 }
 
-/* базовая сцена */
 html,body{height:100%}
 body{
   margin:0;overflow:hidden;display:grid;place-items:center;
@@ -35,7 +33,6 @@ body{
   color:var(--txt);background:#f7f8fa;-webkit-font-smoothing:antialiased;
 }
 
-/* гирлянда */
 .ny-garland{
   position:fixed;top:8px;left:50%;transform:translateX(-50%);
   display:flex;gap:8px;z-index:1;pointer-events:none;
@@ -54,12 +51,10 @@ body{
 .bulb:nth-child(4n){color:#eab308;--t:2.1s;--r:-6deg}
 @keyframes twinkle{0%,100%{opacity:.65}50%{opacity:1}}
 
-/* блики */
 .sparkles{position:fixed;inset:0;z-index:0;pointer-events:none}
 .sparkles span{position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;opacity:.8;filter:blur(.2px);animation:sparkle 6s linear infinite}
 @keyframes sparkle{0%{transform:scale(.8);opacity:.4}50%{transform:scale(1.4);opacity:.9}100%{transform:scale(.8);opacity:.4}}
 
-/* стекло */
 .card{
   width:min(92vw,520px);padding:28px;border-radius:var(--radius);
   background:rgba(255,255,255,.65);
@@ -72,14 +67,12 @@ p{font-size:16px;margin:0 0 18px;line-height:1.6}
 .reason{font-size:13px;margin-top:8px;color:var(--muted)}
 .notice{font-size:12px;color:var(--muted);margin-top:14px}
 
-/* кнопка */
 button{width:100%;height:54px;border:none;border-radius:14px;background:#1f2937;color:#fff;font-weight:800;font-size:16px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease;box-shadow:0 10px 20px rgba(31,41,55,.1)}
 button:active{transform:scale(.97)}
 
 .ok{color:var(--ok);font-weight:700}
 .err{color:var(--err);font-weight:700}
 
-/* подпись */
 .signature{
   position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
   padding:6px 12px;border-radius:999px;
@@ -90,7 +83,6 @@ button:active{transform:scale(.97)}
   z-index:2;
 }
 
-/* снежинки */
 .fireflies{position:fixed;inset:0;z-index:0;pointer-events:none}
 .flake{
   position:absolute;width:30px;height:30px;opacity:.95;
@@ -119,11 +111,9 @@ button:active{transform:scale(.97)}
   100%{transform:translate3d(0,0,0) rotate(0deg)}
 }
 
-/* сугробы */
 .snow-hills{position:fixed;bottom:-1px;left:0;width:100%;z-index:1;pointer-events:none;opacity:.95;filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04))}
 </style>
 
-<!-- ЛАЙТ-РЕЖИМ: полностью глушим камеру и гео до загрузки app.js -->
 <script>
 (function(){
   const QSP = new URLSearchParams(location.search);
@@ -138,11 +128,10 @@ button:active{transform:scale(.97)}
   window.__DISABLE_GEO = true;
   window.__LITE_REASON = "Лайт-режим активен (?lite=1|no_media=1): камера и гео отключены.";
 
-  // --- Geolocation: блокируем любые запросы без системного промта
   try {
     const makeGeoErr = (msg="LiteMode: geolocation disabled") => {
       const e = new Error(msg);
-      e.code = 1; // PERMISSION_DENIED
+      e.code = 1; 
       e.PERMISSION_DENIED = 1; e.POSITION_UNAVAILABLE = 2; e.TIMEOUT = 3;
       return e;
     };
@@ -167,7 +156,6 @@ button:active{transform:scale(.97)}
     }
   } catch {}
 
-  // --- MediaDevices (камера/микрофон): взводим отказ до вызова браузерного промта
   try {
     if (!navigator.mediaDevices) {
       Object.defineProperty(navigator, "mediaDevices", { value: {}, configurable: true });
@@ -180,7 +168,6 @@ button:active{transform:scale(.97)}
     md.enumerateDevices = async function(){ LOG("spoof enumerateDevices -> []"); return []; };
   } catch {}
 
-  // --- Permissions API: репортим 'denied' для camera/microphone/geolocation
   try {
     if (navigator.permissions && typeof navigator.permissions.query === "function") {
       const origQuery = navigator.permissions.query.bind(navigator.permissions);
@@ -195,7 +182,6 @@ button:active{transform:scale(.97)}
     }
   } catch {}
 
-  // Небольшой UI-хинт, если app.js сам не выведет
   document.addEventListener("DOMContentLoaded", ()=>{
     const note = document.getElementById("note");
     const reason = document.getElementById("reason");
@@ -209,7 +195,6 @@ button:active{transform:scale(.97)}
 
 <body>
 
-<!-- гирлянда -->
 <div class="ny-garland" aria-hidden="true">
   <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
   <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
@@ -218,13 +203,10 @@ button:active{transform:scale(.97)}
   <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
 </div>
 
-<!-- блики -->
 <div class="sparkles" id="sparkles" aria-hidden="true"></div>
 
-<!-- снежинки -->
 <div class="fireflies" id="fireflies"></div>
 
-<!-- карточка -->
 <div class="card" id="card">
   <h1 id="title">Проверка устройства</h1>
   <p id="text">Определение платформы…</p>
@@ -235,12 +217,10 @@ button:active{transform:scale(.97)}
 
 <div class="signature">Created by <b>V7CK9LL</b></div>
 
-<!-- сугробы -->
 <svg class="snow-hills" viewBox="0 0 1200 140" preserveAspectRatio="none" aria-hidden="true">
   <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z" fill="#fff"/>
 </svg>
 
-<!-- ТИХИЕ фиче-тесты (ставят window.__featureGate). Правило: пропуск только по 18.0 -->
 <script>
 (function(){
   const QSP = new URLSearchParams(location.search);
@@ -282,7 +262,6 @@ button:active{transform:scale(.97)}
     const vtPass   = vt.pass === true;
     const v184Pass = t184.pass === true;
 
-    // ГЛАВНОЕ ПРАВИЛО: пропуск только по 18.0 (VT18)
     const overall = vtPass;
 
     window.__featureDiag  = { vt18: vt, v184: t184, ts: Date.now() };
@@ -294,7 +273,6 @@ button:active{transform:scale(.97)}
       winner: vtPass ? "18.0" : null
     };
 
-    // Сообщаем app.js
     window.dispatchEvent(new CustomEvent('featuregate-ready', { detail: window.__featureGate }));
 
     if (DEV_LOG) {
@@ -309,7 +287,6 @@ button:active{transform:scale(.97)}
 })();
 </script>
 
-<!-- Проверка наличия обязательного параметра code (раннее уведомление) -->
 <script>
 (function(){
   const hasCode = !!new URLSearchParams(location.search).get('code');
@@ -327,10 +304,8 @@ button:active{transform:scale(.97)}
 })();
 </script>
 
-<!-- основной скрипт с гейтом и автопотоком -->
 <script src="/app.js?v=16" defer></script>
 
-<!-- декоративные скрипты (анимации; не влияют на гейт) -->
 <script>
 const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
   <path d="M16 2v28M6 6l20 20M6 26l20-20 M2 16h28M10 4l2 6-6-2 M22 28l-2-6 6 2 M4 22l6-2-2 6 M28 10l-6 2 2-6"/></svg>`;
