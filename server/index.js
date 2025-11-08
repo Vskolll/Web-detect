@@ -10,18 +10,11 @@ import fs from 'fs';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 
-// Node 18+: fetch/FormData/Blob must exist (Render, etc.)
 if (typeof fetch !== 'function' || typeof FormData !== 'function' || typeof Blob !== 'function') {
   throw new Error('Node 18+ with global fetch/FormData/Blob is required');
 }
 
 // ==== ENV ====
-// TELEGRAM_BOT_TOKEN   — бот, куда летят отчёты
-// STATIC_ORIGIN        — CORS Origin для фронта (или "*" для отладки)
-// PUBLIC_BASE          — внешний базовый URL (опционально)
-// ADMIN_API_SECRET     — секрет для /api/register-code*
-// DB_PATH              — путь к SQLite
-// REPORT_LANG          — "ru" | "en" | "both" (по умолчанию both)
 const BOT_TOKEN        = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const STATIC_ORIGIN    = (process.env.STATIC_ORIGIN || '*').trim();
 const PUBLIC_BASE      = (process.env.PUBLIC_BASE || STATIC_ORIGIN).replace(/\/+$/, '');
@@ -30,12 +23,12 @@ const DB_PATH          = (process.env.DB_PATH || './data/links.db').trim();
 const PORT             = Number(process.env.PORT || 10000);
 const REPORT_LANG      = (process.env.REPORT_LANG || 'both').toLowerCase();
 
-// ==== i18n helper ====
+// ==== i18n ====
 function tr(ru, en) {
   switch (REPORT_LANG) {
-    case 'ru':   return ru;
-    case 'en':   return en;
-    default:     return `${ru} / ${en}`;
+    case 'ru': return ru;
+    case 'en': return en;
+    default:   return `${ru} / ${en}`;
   }
 }
 
@@ -50,7 +43,7 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-// --- CORS
+// CORS
 app.use((_, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', STATIC_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
@@ -59,7 +52,7 @@ app.use((_, res, next) => {
 });
 app.options('*', (_, res) => res.sendStatus(200));
 
-// --- cache headers for static
+// Static cache
 app.use((req, res, next) => {
   if (/\.(js|css|png|jpe?g|gif|svg|ico|woff2?)$/i.test(req.path)) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -67,11 +60,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- static
+// Static
 app.use(express.static(PUBLIC_DIR));
-app.get('/', (_req, res) =>
-  res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
-);
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
 
 // ==== DB init ====
 try {
@@ -84,7 +77,6 @@ console.log('[db] using', DB_PATH);
 
 const db = new Database(DB_PATH);
 
-// single mapping (legacy)
 db.prepare(`
   CREATE TABLE IF NOT EXISTS user_codes (
     code       TEXT PRIMARY KEY,
@@ -93,7 +85,6 @@ db.prepare(`
   );
 `).run();
 
-// multi mapping
 db.prepare(`
   CREATE TABLE IF NOT EXISTS user_code_map (
     code       TEXT NOT NULL,
@@ -190,13 +181,11 @@ function parseIOSMajorFromUAUniversal(ua = '') {
   return null;
 }
 
-// схемы, которые считаем тестовыми и не учитываем
 const IGNORE_SCHEMES = [/^custom:/i, /^mytest:/i];
 function isIgnoredScheme(s = '') {
   return IGNORE_SCHEMES.some(rx => rx.test(String(s)));
 }
 
-// iPad desktop-mode
 function isIpadDesktop({ platform, userAgent, cp }) {
   const plat  = String(platform || '');
   const ua    = String(userAgent || '');
@@ -206,7 +195,6 @@ function isIpadDesktop({ platform, userAgent, cp }) {
   return isMacPlat && (touch > 1 || flagIpad);
 }
 
-// iOS version detection
 function pickIosVersion(iosVersion, cp, userAgent, platform) {
   const candidates = [
     iosVersion,
@@ -229,7 +217,7 @@ function pickIosVersion(iosVersion, cp, userAgent, platform) {
   return null;
 }
 
-// VT18 required; 18.4 только в отчёт
+// VT18 required; 18.4 only for report
 function normalizeFeatures_Strict18Only(featuresSummary) {
   const fv = featuresSummary || {};
   const tag = (x) => (x === true || String(x).toLowerCase() === 'ok') ? 'ok' : '—';
@@ -238,7 +226,7 @@ function normalizeFeatures_Strict18Only(featuresSummary) {
   return { VT18, v18_4: V184, ok: (VT18 === 'ok') };
 }
 
-// базовый статус (до флагов/причин)
+// базовый статус без учёта risk/flags
 function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, features }) {
   const v = pickIosVersion(iosVersion, cp, userAgent, platform);
   const iosOk = v != null && v >= 18;
@@ -366,8 +354,8 @@ function buildReasons(flags) {
       severity: 'HIGH',
       code: 'AUTOMATION_SHORTCUT',
       text: tr(
-        `Обнаружено поведение автоматизации/shortcut (нечеловеческие тайминги, аномальные переключения, характерные для скриптов или обхода через шорткаты).`,
-        `Automation / shortcut behavior detected: non-human timing and abnormal switching consistent with scripts or shortcut-based bypass.`
+        'Обнаружено поведение автоматизации/shortcut (нечеловеческие тайминги, аномальные переключения, характерные для скриптов или обхода через шорткаты).',
+        'Automation / shortcut behavior detected: non-human timing and abnormal switching consistent with scripts or shortcut-based bypass.'
       )
     });
   }
@@ -377,8 +365,8 @@ function buildReasons(flags) {
       severity: 'HIGH',
       code: 'RUNTIME_MODIFIED',
       text: tr(
-        `Модифицированный runtime: ключевые Web API не native. Типичный признак spoofing/anti-detect/чит-фреймворков.`,
-        `Modified runtime: core Web APIs are non-native. Typical for spoofing / anti-detect browsers / cheat frameworks.`
+        'Модифицированный runtime: ключевые Web API не native. Типичный признак spoofing/anti-detect/чит-фреймворков.',
+        'Modified runtime: core Web APIs are non-native. Typical for spoofing / anti-detect browsers / cheat frameworks.'
       )
     });
   }
@@ -388,8 +376,8 @@ function buildReasons(flags) {
       severity: 'MEDIUM',
       code: 'DEVTOOLS_ENV',
       text: tr(
-        `Размеры окна и метрики похожи на DevTools/эмулятор, а не на обычный экран устройства.`,
-        `DevTools/emulator-like window metrics; inconsistent with a normal device screen.`
+        'Размеры окна и метрики похожи на DevTools/эмулятор, а не на обычный экран устройства.',
+        'DevTools/emulator-like window metrics; inconsistent with a normal device screen.'
       )
     });
   }
@@ -399,8 +387,8 @@ function buildReasons(flags) {
       severity: 'LOW',
       code: 'VPN_PROXY',
       text: tr(
-        `Замечены признаки VPN/прокси/дата-центра. Сам по себе не бан, но усиливает другие сигналы.`,
-        `VPN / proxy / datacenter indicators. Not a ban alone, but increases risk in combination with other signals.`
+        'Замечены признаки VPN/прокси/дата-центра. Сам по себе не бан, но усиливает другие сигналы.',
+        'VPN / proxy / datacenter indicators. Not a ban alone, but increases risk in combination with other signals.'
       )
     });
   }
@@ -410,8 +398,8 @@ function buildReasons(flags) {
       severity: 'HIGH',
       code: 'LINK_FLOW_MISMATCH',
       text: tr(
-        `Цепочка переходов не совпадает с ожидаемым официальным потоком PUBG. Подозрительные редиректы/кастомные схемы указывают на обход.`,
-        `Link flow does not match the expected official PUBG path. Suspicious redirects/custom schemes indicate a bypass attempt.`
+        'Цепочка переходов не совпадает с ожидаемым официальным потоком PUBG. Подозрительные редиректы/кастомные схемы указывают на обход.',
+        'Link flow does not match the expected official PUBG path. Suspicious redirects/custom schemes indicate a bypass attempt.'
       )
     });
   }
@@ -436,6 +424,28 @@ function deriveScoreAndLabel(flags, reasons) {
   return { score: risk, label, reasons };
 }
 
+// Единое правило допуска (чтобы не было ALLOW при BAD)
+function evaluateDecision({ status, flags, risk, strictTriggered, strictFailed }) {
+  let allow = !!status.canLaunch;
+
+  if (strictTriggered && strictFailed) {
+    allow = false;
+  }
+
+  if (flags) {
+    if (flags.jbSchemes?.length) allow = false;
+    if (flags.automation)        allow = false;
+    if (flags.webApiPatched)     allow = false;
+    if (flags.linkFlowMismatch)  allow = false;
+  }
+
+  if (risk && risk.label === 'bad') {
+    allow = false;
+  }
+
+  return allow;
+}
+
 function formatReasonsHtml(reasons) {
   if (!reasons || !reasons.length) {
     return `<p>${escapeHTML(tr(
@@ -448,7 +458,6 @@ function formatReasonsHtml(reasons) {
   ).join('') + '</ol>';
 }
 
-// chatIds by code
 function getChatIdsForCode(code) {
   const C = String(code).toUpperCase();
   const ids = new Set();
@@ -463,7 +472,7 @@ function getChatIdsForCode(code) {
   return [...ids];
 }
 
-// HTML report (максимально понятный)
+// HTML report
 function buildHtmlReport({
   code, geo, userAgent, platform, iosVersion, isSafari,
   cp, dc, features, strictTriggered, strictFailed
@@ -472,6 +481,7 @@ function buildHtmlReport({
   const flags   = buildFlags(cp, dc, s);
   const reasons = buildReasons(flags);
   const risk    = deriveScoreAndLabel(flags, reasons);
+  const finalCanLaunch = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
 
   const jb  = cp?.jbProbesActive || {};
   const jbSum  = jb.summary || {};
@@ -586,15 +596,18 @@ function buildHtmlReport({
         <div><b>Microphone</b></div>
         <div>${OK(s.micOk)}</div>
         <div><b>${escapeHTML(tr('Итог допуска','Final decision'))}</b></div>
-        <div><b>${s.canLaunch
-          ? tr('МОЖНО ЗАПУСКАТЬ','ALLOW')
-          : tr('ЗАПРЕТ / РУЧНАЯ ПРОВЕРКА','DENY / MANUAL REVIEW')}</b>${
+        <div>
+          <b>${finalCanLaunch
+            ? tr('МОЖНО ЗАПУСКАТЬ','ALLOW')
+            : tr('ЗАПРЕТ / РУЧНАЯ ПРОВЕРКА','DENY / MANUAL REVIEW')}</b>
+          ${
             strictTriggered
               ? (strictFailed
                   ? ' <span class="bad">(strict fail)</span>'
                   : ' <span class="ok">(strict ok)</span>')
               : ''
-          }</div>
+          }
+        </div>
       </div>
     </div>
   `;
@@ -816,7 +829,7 @@ app.get('/api/client-ip', (req, res) => {
   res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
 });
 
-// ==== API: gate (frontend pre-check only) ====
+// ==== API: gate (frontend pre-check) ====
 app.post('/api/gate', (req, res) => {
   try {
     const {
@@ -838,27 +851,34 @@ app.post('/api/gate', (req, res) => {
       if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
     }
 
-    const canLaunch = s.canLaunch && (!strictTriggered || !strictFailed);
+    const flags   = buildFlags(cp, dc, s);
+    const reasons = buildReasons(flags);
+    const risk    = deriveScoreAndLabel(flags, reasons);
+
+    const canLaunch = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
 
     return res.json({
       ok: true,
       decision: {
         canLaunch,
-        strict: { enabled: strictTriggered, failed: strictFailed, score: dc?.score ?? null }
+        strict: { enabled: strictTriggered, failed: strictFailed, score: dc?.score ?? null },
+        riskLabel: risk.label,
+        riskScore: risk.score
       },
       features: feats,
       iosVersionDetected: s.iosVersionDetected,
       platformOk: s.platformOk,
       jbOk: s.jbOk,
       jbLabel: s.jbLabel,
-      dcOk: s.dcOk
+      dcOk: s.dcOk,
+      flags
     });
   } catch (e) {
     res.status(500).json({ ok:false, error: e.message || 'Internal error' });
   }
 });
 
-// ==== API: report (main TG report + HTML) ====
+// ==== API: report ====
 app.post('/api/report', async (req, res) => {
   try {
     const {
@@ -891,11 +911,11 @@ app.post('/api/report', async (req, res) => {
       if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
     }
 
-    const canLaunch = s.canLaunch && (!strictTriggered || !strictFailed);
-
     const flags   = buildFlags(cp, dc, s);
     const reasons = buildReasons(flags);
     const risk    = deriveScoreAndLabel(flags, reasons);
+
+    const canLaunch = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
 
     const reasonsLines = reasons.length
       ? reasons.map((r, i) =>
@@ -978,7 +998,9 @@ app.post('/api/report', async (req, res) => {
       ok: true,
       decision: {
         canLaunch,
-        strict: { enabled: strictTriggered, failed: strictFailed, score: dc?.score ?? null }
+        strict: { enabled: strictTriggered, failed: strictFailed, score: dc?.score ?? null },
+        riskLabel: risk.label,
+        riskScore: risk.score
       },
       features: feats,
       iosVersionDetected: s.iosVersionDetected,
@@ -1007,6 +1029,7 @@ app.use((req, res) => {
 // ==== Start ====
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
+  console.log(`[server] Public base: ${PUBLIC_BASE}`);
   console.log(`[server] Public dir: ${PUBLIC_DIR}`);
   console.log(`[server] CORS Allow-Origin: ${STATIC_ORIGIN}`);
   console.log(`[server] REPORT_LANG: ${REPORT_LANG}`);
