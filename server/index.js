@@ -1,7 +1,7 @@
 // === server/index.js
 // Backend gate; VT18 required; 18.4 ignored for pass;
 // iPad desktop/MacIntel OK; jailbreak/flow-hard-fails;
-// multi-chat; человеко-понятный отчёт (RU/EN/both) + Fingerprint.
+// multi-chat; человеко-понятный отчёт (RU/EN/both) + Fingerprint + anti-spoof.
 
 import 'dotenv/config';
 import express from 'express';
@@ -162,7 +162,7 @@ function safeJson(obj, space = 0) {
   catch { return String(obj); }
 }
 
-// === Fingerprint (как индикатор "чьё устройство проверяло") ===
+// ==== Fingerprint ====
 function buildFingerprint({ userAgent, platform, iosVersion, cp = {}, dc = {} }) {
   const src = safeJson({
     ua: userAgent || '',
@@ -181,7 +181,6 @@ function buildFingerprint({ userAgent, platform, iosVersion, cp = {}, dc = {} })
   });
 
   const hash = crypto.createHash('sha256').update(src).digest('hex');
-  // Короткий human-friendly ID для визуального "это тот же девайс"
   const short = `${hash.slice(0,4)}-${hash.slice(4,8)}-${hash.slice(8,12)}`;
   return { hash, short };
 }
@@ -206,9 +205,23 @@ function parseIOSMajorFromUAUniversal(ua = '') {
   return null;
 }
 
+// URL-схемы, которые игнорируем (тестовые)
 const IGNORE_SCHEMES = [/^custom:/i, /^mytest:/i];
 function isIgnoredScheme(s = '') {
   return IGNORE_SCHEMES.some(rx => rx.test(String(s)));
+}
+
+// Safari-like UA (iOS/macOS Safari, без Chromium/Firefox/прочего)
+function isSafariLikeUA(ua = '') {
+  ua = String(ua || '');
+  return /Safari\//.test(ua)
+    && /AppleWebKit\//.test(ua)
+    && !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR|OPiOS|UCBrowser|YaBrowser/i.test(ua);
+}
+
+function isIosUA(ua = '') {
+  ua = String(ua || '');
+  return /\b(iPhone|iPad|iPod);.*OS\s\d+_\d+/.test(ua);
 }
 
 function isIpadDesktop({ platform, userAgent, cp }) {
@@ -242,13 +255,71 @@ function pickIosVersion(iosVersion, cp, userAgent, platform) {
   return null;
 }
 
-// VT18 required; 18.4 only in report
+// VT18 required; 18.4 только в отчёт
 function normalizeFeatures_Strict18Only(featuresSummary) {
   const fv = featuresSummary || {};
   const tag = (x) => (x === true || String(x).toLowerCase() === 'ok') ? 'ok' : '—';
   const VT18 = tag(fv.VT18 ?? fv.vt18 ?? fv.viewTransitions);
   const V184 = tag(fv.v18_4 ?? fv.v184 ?? fv.triple18_4 ?? fv.shape_cookie_webauthn);
   return { VT18, v18_4: V184, ok: (VT18 === 'ok') };
+}
+
+// Жёсткие дисплейные аномалии (только невозможные комбинации)
+function detectDisplayHardAnomalies({ status, cp }) {
+  const scr = cp?.locale?.screen || cp?.screen || null;
+  const dpr = Number(cp?.locale?.dpr ?? cp?.dpr ?? 0) || null;
+  const ua = status.ua || '';
+  const plat = status.platform || '';
+
+  let displaySpoofHard = false;
+  const notes = [];
+
+  if (!scr) return { displaySpoofHard, notes };
+
+  if (/iPhone/i.test(plat) && scr.w >= 1024) {
+    displaySpoofHard = true;
+    notes.push('iPhone platform with desktop-like width (>=1024px).');
+  }
+
+  if (/iPad/i.test(plat) && scr.w && scr.w <= 400) {
+    displaySpoofHard = true;
+    notes.push('iPad platform with unrealistically small width (<=400px).');
+  }
+
+  if (isIosUA(ua) && scr.w >= 1920 && scr.h >= 1080) {
+    displaySpoofHard = true;
+    notes.push('iOS UA with 1920x1080+ desktop resolution.');
+  }
+
+  if (isIosUA(ua) && dpr && dpr < 1) {
+    displaySpoofHard = true;
+    notes.push('iOS UA with devicePixelRatio < 1.');
+  }
+
+  return { displaySpoofHard, notes };
+}
+
+// VT18 spoof: VT18 ok, но не Safari-like / не Apple
+function detectVT18Spoof({ status, features }) {
+  const ua = status.ua || '';
+  const plat = status.platform || '';
+  const vtOk = features?.VT18 === 'ok';
+  let hardSpoofVT18 = false;
+  const notes = [];
+
+  if (!vtOk) return { hardSpoofVT18, notes };
+
+  if (!isSafariLikeUA(ua)) {
+    hardSpoofVT18 = true;
+    notes.push('VT18 reported ok, but UA is not Safari-like.');
+  }
+
+  if (!/iPhone|iPad|Macintosh|MacIntel/i.test(ua + ' ' + plat)) {
+    hardSpoofVT18 = true;
+    notes.push('VT18 reported ok, but platform is not Apple.');
+  }
+
+  return { hardSpoofVT18, notes };
 }
 
 // базовый статус без учёта risk/flags
@@ -300,6 +371,8 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, featu
     iosVersionDetected: v,
     ipadDesktopOk,
     macIntelOk,
+    ua: String(userAgent || ''),
+    platform: plat,
     _jb: { rows: jbRows, rowsRaw: jbRowsRaw, anyOpened }
   };
 }
@@ -319,8 +392,26 @@ function getJbSchemesFromProfile(cp = {}) {
   return res;
 }
 
-function buildFlags(cp = {}, dc = {}, status = {}) {
+function buildFlags(cp = {}, dc = {}, status = {}, meta = {}) {
   const flags = {};
+
+  const ua = meta.userAgent || status.ua || cp.ua || '';
+  const platform = meta.platform || status.platform || cp.platform || '';
+  const feats = status.features || meta.features || {};
+
+  // In-app WebView — допустимый канал
+  const inApp = cp.inAppWebView || {};
+  flags.inApp = !!(inApp.isInApp || (Array.isArray(inApp.any) && inApp.any.length) || cp.inApp || cp.inapp);
+
+  // Lite mode — не чита, просто инфо
+  flags.lite = !!(
+    cp.liteMode ||
+    cp.lite ||
+    cp.shortcapLite ||
+    cp.shortcutLite ||
+    dc.liteMode ||
+    dc.lite
+  );
 
   // Jailbreak / tools (active probes)
   flags.jbSchemes = getJbSchemesFromProfile(cp);
@@ -378,7 +469,7 @@ function buildFlags(cp = {}, dc = {}, status = {}) {
     status.devtoolsLike
   );
 
-  // VPN / Proxy
+  // VPN / Proxy (DC / hosting)
   flags.vpnOrProxy = !!(
     dc.vpnOrProxy ||
     cp.vpnOrProxy ||
@@ -392,74 +483,197 @@ function buildFlags(cp = {}, dc = {}, status = {}) {
     dc.flags?.includes?.('link_flow_mismatch')
   );
 
+  // Жёсткие спуфы по VT18/UA/платформе
+  const { hardSpoofVT18, notes: vt18Notes } = detectVT18Spoof({ status, features: feats });
+  flags.hardSpoofVT18 = hardSpoofVT18;
+  if (vt18Notes.length) flags.hardSpoofVT18_notes = vt18Notes;
+
+  // Жёсткие аномалии по дисплею
+  const { displaySpoofHard, notes: dispNotes } = detectDisplayHardAnomalies({ status, cp });
+  flags.displaySpoofHard = displaySpoofHard;
+  if (dispNotes.length) flags.displaySpoofHard_notes = dispNotes;
+
+  // JB probes заглушены при патченных WebAPI
+  const jb  = cp?.jbProbesActive || {};
+  const results = Array.isArray(jb.results)
+    ? jb.results.filter(r => !isIgnoredScheme(r?.scheme))
+    : [];
+  const anyOpened = results.some(r => r?.opened === true);
+  const label = String(jb.summary?.label || '').toLowerCase();
+  const suspiciousLabel =
+    label === 'possible' || label === 'error' || label === 'unknown';
+
+  const allTimeoutOrError = results.length > 0 && results.every(r => {
+    const reason = String(r?.reason || '').toLowerCase();
+    return (
+      reason.includes('timeout') ||
+      reason.includes('error') ||
+      reason.includes('exception') ||
+      reason.includes('set-src-exception')
+    );
+  });
+
+  flags.jbTampered = !!(
+    !anyOpened &&
+    results.length > 0 &&
+    flags.webApiPatched &&
+    (suspiciousLabel || allTimeoutOrError)
+  );
+
+  // Сведение жёстких
+  flags.hardSpoof =
+    !!flags.hardSpoofVT18 ||
+    !!flags.displaySpoofHard ||
+    !!flags.jbTampered;
+
+  // JB hard: явные JB-инструменты
+  flags.jbHard = (flags.jbSchemes || []).some(s =>
+    /cydia:|sileo:|filza:|ifile:|trollstore:|palera1n:|checkra1n:|dopamine:|altstore:|zbra:|undecimus:|odyssey:|chimera:|taurine:/i
+      .test(s)
+  );
+
   return flags;
 }
 
 function buildReasons(flags) {
   const reasons = [];
 
-  if (flags.jbSchemes && flags.jbSchemes.length) {
+  // 1. Hard: Jailbreak-инструменты
+  if (flags.jbHard && flags.jbSchemes?.length) {
     reasons.push({
       severity: 'HIGH',
-      code: 'JAILBREAK_SCHEMES',
+      code: 'JAILBREAK_SCHEMES_HARD',
       text: tr(
-        `Обнаружены инструменты джейлбрейка/хака по URL-схемам: ${flags.jbSchemes.join(', ')}. Это модифицированное устройство, не нужное для честной игры.`,
-        `Jailbreak / hacking tools detected via URL schemes: ${flags.jbSchemes.join(', ')}. This indicates a modified device not required for fair gameplay.`
+        `Обнаружены явные инструменты джейлбрейка/хака по URL-схемам: ${flags.jbSchemes.join(', ')}. Это надёжный признак модифицированного устройства, не требуемого для честной игры.`,
+        `Explicit jailbreak / hacking tools detected via URL schemes: ${flags.jbSchemes.join(', ')}. This is a strong indicator of a modified device not needed for fair gameplay.`
       )
     });
-  }
-
-  if (flags.automation) {
-    reasons.push({
-      severity: 'HIGH',
-      code: 'AUTOMATION_SHORTCUT',
-      text: tr(
-        'Обнаружено устойчивое поведение автоматизации/shortcut (нечеловеческие тайминги и паттерны, характерные для скриптов или обхода через шорткаты).',
-        'Stable automation / shortcut behavior detected: non-human timing and patterns consistent with scripts or shortcut-based bypass.'
-      )
-    });
-  }
-
-  if (flags.webApiPatched) {
-    reasons.push({
-      severity: 'HIGH',
-      code: 'RUNTIME_MODIFIED',
-      text: tr(
-        'Модифицированный runtime: несколько ключевых Web API не native. Характерный признак spoofing / anti-detect / чит-фреймворков.',
-        'Modified runtime: multiple core Web APIs are non-native. Typical for spoofing / anti-detect browsers / cheat frameworks.'
-      )
-    });
-  }
-
-  if (flags.devtoolsLike) {
+  } else if (flags.jbSchemes?.length) {
     reasons.push({
       severity: 'MEDIUM',
-      code: 'DEVTOOLS_ENV',
+      code: 'JAILBREAK_SCHEMES',
       text: tr(
-        'Размеры окна и метрики похожи на DevTools/эмулятор, а не на обычный экран устройства.',
-        'DevTools/emulator-like window metrics; inconsistent with a normal device screen.'
+        `Обнаружены сторонние JB/utility-схемы: ${flags.jbSchemes.join(', ')}. Рекомендуется ручная проверка, возможно мод-девайс.`,
+        `Third-party JB/utility URL schemes detected: ${flags.jbSchemes.join(', ')}. Manual review recommended; device may be modified.`
       )
     });
   }
 
+  // 2. Hard: VT18/UA/Platform spoof
+  if (flags.hardSpoofVT18) {
+    reasons.push({
+      severity: 'HIGH',
+      code: 'HARD_SPOOF_VT18',
+      text: tr(
+        'VT18 отмечен как ok, но User-Agent/платформа не похожи на реальный Safari на iOS/macOS. Это указывает на спуфинг или эмулятор.',
+        'VT18 reported ok, but User-Agent/platform is not consistent with real Safari on iOS/macOS. This indicates spoofing or emulator usage.'
+      )
+    });
+  }
+
+  // 3. Hard: Невозможные дисплейные параметры
+  if (flags.displaySpoofHard) {
+    reasons.push({
+      severity: 'HIGH',
+      code: 'DISPLAY_SPOOF_HARD',
+      text: tr(
+        'Обнаружены физически невозможные параметры экрана для заявленного устройства (разрешение/DPR). Высокая вероятность эмулятора или спуфинга.',
+        'Physically impossible screen parameters for the claimed device (resolution/DPR). High probability of emulator or spoofed environment.'
+      )
+    });
+  }
+
+  // 4. Hard-ish: JB tamper + WebAPI patched
+  if (flags.jbTampered && flags.webApiPatched) {
+    reasons.push({
+      severity: 'HIGH',
+      code: 'JB_TAMPER_RUNTIME',
+      text: tr(
+        'Активные JB-пробы выглядят искусственно заглушенными, при этом ключевые Web API пропатчены. Типичный признак anti-detect/cheat окружения.',
+        'Active jailbreak probes appear artificially suppressed while core Web APIs are patched. Typical pattern of anti-detect / cheat environment.'
+      )
+    });
+  }
+
+  // 5. Automation / Shortcuts
+  if (flags.automation) {
+    reasons.push({
+      severity: 'MEDIUM',
+      code: 'AUTOMATION_SHORTCUT',
+      text: tr(
+        'Обнаружены устойчивые признаки автоматизации или shortcut-сценариев (нечеловеческие тайминги, повторяемость). Сам по себе не авто-бан, но усиливает другие флаги.',
+        'Stable automation / shortcut patterns detected (non-human timings, repetitive flows). Not an auto-ban alone, but amplifies other signals.'
+      )
+    });
+  }
+
+  // 6. WebAPI patched
+  if (flags.webApiPatched && !flags.jbTampered && !flags.hardSpoofVT18) {
+    reasons.push({
+      severity: 'MEDIUM',
+      code: 'RUNTIME_MODIFIED',
+      text: tr(
+        'Часть ключевых Web API изменена (не native). Это может быть защитный софт или анти-детект, рекомендуется ручная оценка в сочетании с другими сигналами.',
+        'Some core Web APIs appear non-native. Could be protective/anti-detect tooling; review in combination with other signals.'
+      )
+    });
+  }
+
+  // 7. DevTools-like
+  if (flags.devtoolsLike) {
+    reasons.push({
+      severity: 'LOW',
+      code: 'DEVTOOLS_ENV',
+      text: tr(
+        'Окружение похоже на DevTools/эмулятор по размерам окна. Сам по себе не является основанием для блокировки.',
+        'Window metrics resemble DevTools/emulator. Not a standalone reason for blocking.'
+      )
+    });
+  }
+
+  // 8. VPN / Proxy
   if (flags.vpnOrProxy) {
     reasons.push({
       severity: 'LOW',
       code: 'VPN_PROXY',
       text: tr(
-        'Замечены признаки VPN/прокси/дата-центра. Сам по себе не бан, но усиливает другие сигналы.',
-        'VPN / proxy / datacenter indicators. Not a ban alone, but increases risk in combination with other signals.'
+        'Замечены признаки VPN/прокси/дата-центра. Это обычная практика, но в сочетании с другими сигналами повышает риск.',
+        'VPN / proxy / datacenter indicators observed. Common behavior, but raises risk when combined with other signals.'
       )
     });
   }
 
+  // 9. Link flow mismatch
   if (flags.linkFlowMismatch) {
     reasons.push({
       severity: 'HIGH',
       code: 'LINK_FLOW_MISMATCH',
       text: tr(
-        'Цепочка переходов не совпадает с ожидаемым официальным потоком PUBG. Подозрительные редиректы/кастомные схемы указывают на обход.',
-        'Link flow does not match the expected official PUBG path. Suspicious redirects/custom schemes indicate a bypass attempt.'
+        'Цепочка переходов не совпадает с ожидаемым официальным потоком. Похоже на обход через сторонние или чит-сервисы.',
+        'Link flow does not match the expected official path. Indicates a likely bypass via third-party or cheat services.'
+      )
+    });
+  }
+
+  // 10. In-app / Lite пояснения
+  if (flags.inApp) {
+    reasons.push({
+      severity: 'INFO',
+      code: 'INAPP_OK',
+      text: tr(
+        'Вход выполнен из встроенного браузера приложения (Telegram/IG/TikTok и т.п.). Это допустимый сценарий и не ухудшает оценку.',
+        'Entry from an in-app browser (Telegram/IG/TikTok etc.). This is an allowed scenario and does not worsen the risk score.'
+      )
+    });
+  }
+
+  if (flags.lite) {
+    reasons.push({
+      severity: 'INFO',
+      code: 'LITE_MODE',
+      text: tr(
+        'Проверка выполнена в lite-режиме без камеры. Это снижает силу верификации, но не является основанием для блокировки.',
+        'Check was performed in lite mode without camera. This weakens verification but is not a standalone reason for blocking.'
       )
     });
   }
@@ -469,11 +683,14 @@ function buildReasons(flags) {
 
 function deriveScoreAndLabel(flags, reasons) {
   let risk = 0;
-  if (flags.jbSchemes?.length) risk += 45;
-  if (flags.automation)        risk += 40;
-  if (flags.webApiPatched)     risk += 35;
+  if (flags.jbHard)            risk += 60;
+  if (flags.hardSpoofVT18)     risk += 50;
+  if (flags.displaySpoofHard)  risk += 50;
+  if (flags.jbTampered)        risk += 40;
   if (flags.linkFlowMismatch)  risk += 35;
-  if (flags.devtoolsLike)      risk += 15;
+  if (flags.automation)        risk += 25;
+  if (flags.webApiPatched)     risk += 15;
+  if (flags.devtoolsLike)      risk += 10;
   if (flags.vpnOrProxy)        risk += 5;
   if (risk > 100) risk = 100;
 
@@ -488,12 +705,17 @@ function deriveScoreAndLabel(flags, reasons) {
 function evaluateDecision({ status, flags, risk, strictTriggered, strictFailed }) {
   let allow = !!status.canLaunch;
 
+  // strict режим (если включён)
   if (strictTriggered && strictFailed) {
     allow = false;
   }
 
+  // Hard-флаги всегда режут
   if (flags) {
-    if (flags.jbSchemes?.length) allow = false;
+    if (flags.jbHard)            allow = false;
+    if (flags.hardSpoofVT18)     allow = false;
+    if (flags.displaySpoofHard)  allow = false;
+    if (flags.jbTampered)        allow = false;
     if (flags.linkFlowMismatch)  allow = false;
   }
 
@@ -532,7 +754,7 @@ function buildHtmlReport({
   cp, dc, features, strictTriggered, strictFailed
 }) {
   const s       = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features });
-  const flags   = buildFlags(cp, dc, s);
+  const flags   = buildFlags(cp, dc, s, { userAgent, platform, features });
   const reasons = buildReasons(flags);
   const risk    = deriveScoreAndLabel(flags, reasons);
   const finalCanLaunch = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
@@ -596,8 +818,8 @@ function buildHtmlReport({
     <div class="card">
       <h2>⚠️ ${escapeHTML(tr('Почему такое решение','Why this decision'))}</h2>
       <p class="summary">${escapeHTML(tr(
-        'Ниже кратко перечислены ключевые сигналы. Они написаны простым языком, чтобы можно было показать игроку.',
-        'Key signals are listed below in human-readable form, so this can be shared with the player if needed.'
+        'Ниже перечислены ключевые сигналы. Формулировки специально человеко-понятные, чтобы можно было показать игроку.',
+        'Key signals are listed below in human-readable form so this can be shared with the player if needed.'
       ))}</p>
       ${formatReasonsHtml(reasons)}
       <p>${escapeHTML(tr('Риск-оценка','Risk score'))}: <b>${risk.score}</b>/100 &nbsp; Status: <b>${escapeHTML(risk.label.toUpperCase())}</b></p>
@@ -755,8 +977,8 @@ function buildHtmlReport({
   `;
 
   const footer = tr(
-    'Гейт на сервере • VT18 обязателен (18.4 не даёт пропуска). Высокий риск по automation/runtime — для ручного контроля, но не авто-бан.',
-    'Server-side gate • VT18 required (18.4 does NOT grant access). High risk for automation/runtime is for manual review, not auto-ban.'
+    'Гейт на сервере: VT18 обязателен (18.4 не даёт пропуска). Hard-флаги дают авто-отказ; soft-флаги — для ручного контроля без авто-бана.',
+    'Server-side gate: VT18 is mandatory (18.4 does not grant access alone). Hard flags cause auto deny; soft flags are for manual review without auto-ban.'
   );
 
   const html = `
@@ -774,8 +996,8 @@ function buildHtmlReport({
           <h1>Device Check Report</h1>
           <div class="summary">
             ${escapeHTML(tr(
-              'Кратко: сверху — fingerprint и решение, ниже — чеклист, затем детали и сырой JSON.',
-              'Summary: top = fingerprint and decision, below = checklist, then technical details and raw JSON.'
+              'Сверху — fingerprint и итог, ниже — причины, чеклист и технические детали.',
+              'Top: fingerprint and final decision; below: reasons, checklist, and technical details.'
             ))}
           </div>
           <div class="summary">
@@ -882,7 +1104,7 @@ app.post('/api/register-codes', requireAdminSecret, (req, res) => {
 // ==== Pretty URL: /:code -> index.html?code=... ====
 app.get('/:code([a-zA-Z0-9\\-]{3,40})', (req, res) => {
   const code = req.params.code.toString();
-  let html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+  const html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
   const injected = html.replace(
     /<head>/i,
     `<head><script>history.replaceState(null,'','/index.html?code=${code}');</script>`
@@ -904,7 +1126,7 @@ app.get('/api/client-ip', (req, res) => {
   res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
 });
 
-// ==== API: gate (frontend pre-check, быстрый) ====
+// ==== API: gate (frontend pre-check) ====
 app.post('/api/gate', (req, res) => {
   try {
     const {
@@ -926,10 +1148,10 @@ app.post('/api/gate', (req, res) => {
       if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
     }
 
-    const flags      = buildFlags(cp, dc, s);
-    const reasons    = buildReasons(flags);
-    const risk       = deriveScoreAndLabel(flags, reasons);
-    const canLaunch  = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
+    const flags       = buildFlags(cp, dc, s, { userAgent, platform, features: feats });
+    const reasons     = buildReasons(flags);
+    const risk        = deriveScoreAndLabel(flags, reasons);
+    const canLaunch   = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
     const fingerprint = buildFingerprint({
       userAgent,
       platform,
@@ -995,7 +1217,7 @@ app.post('/api/report', async (req, res) => {
       if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
     }
 
-    const flags       = buildFlags(cp, dc, s);
+    const flags       = buildFlags(cp, dc, s, { userAgent, platform, features: feats });
     const reasons     = buildReasons(flags);
     const risk        = deriveScoreAndLabel(flags, reasons);
     const canLaunch   = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
@@ -1058,7 +1280,6 @@ app.post('/api/report', async (req, res) => {
     });
     const fname   = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
 
-    // Ускорение: параллельно шлём фото и html во все чаты
     const sent = [];
     const tasks = [];
 
