@@ -2,240 +2,126 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>18+ Вход — Проверка устройства</title>
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="format-detection" content="telephone=no">
-<meta name="theme-color" content="#ffffff">
-<meta name="color-scheme" content="light dark">
+<title>Проверка устройства 18+</title>
 
 <script>
-  window.__API_BASE = (typeof location !== 'undefined' && location.origin)
-    ? location.origin.replace(/\/+$/, '')
-    : '';
+  window.__API_BASE = location.origin.replace(/\/+$/, "");
 </script>
 
 <style>
-:root{
-  --txt:#111;--sub:#444;--muted:#6b7280;
-  --primary:#2563eb;--primary2:#60a5fa;
-  --err:#ef4444;--ok:#16a34a;
-  --radius:20px;--shadow:0 6px 28px rgba(0,0,0,.08);
-  --gold-h:47;
+/* ------ ФОН ВИДЕО ------ */
+body, html {
+  padding: 0;
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
 }
 
-html,body{height:100%}
-body{
-  margin:0;overflow:hidden;display:grid;place-items:center;
-  font-family:"SF Pro Display","Segoe UI",Roboto,system-ui,-apple-system,sans-serif;
-  color:var(--txt);background:#f7f8fa;-webkit-font-smoothing:antialiased;
+.video-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
 }
 
-/* гирлянда */
-.ny-garland{
-  position:fixed;top:8px;left:50%;transform:translateX(-50%);
-  display:flex;gap:8px;z-index:1;pointer-events:none;
-  filter:drop-shadow(0 2px 4px rgba(0,0,0,.06));
-}
-.bulb{
-  width:8px;height:12px;border-radius:3px 3px 6px 6px;
-  background:currentColor;opacity:.9;
-  box-shadow:0 0 8px currentColor,0 0 14px currentColor;
-  transform-origin:top center;transform:rotate(var(--r,5deg));
-  animation:twinkle var(--t,2.4s) ease-in-out infinite;
-}
-.bulb:nth-child(4n+1){color:#ef4444;--t:2.6s;--r:6deg}
-.bulb:nth-child(4n+2){color:#22c55e;--t:2.2s;--r:-5deg}
-.bulb:nth-child(4n+3){color:#3b82f6;--t:2.8s;--r:4deg}
-.bulb:nth-child(4n){color:#eab308;--t:2.1s;--r:-6deg}
-@keyframes twinkle{0%,100%{opacity:.65}50%{opacity:1}}
-
-.sparkles{position:fixed;inset:0;z-index:0;pointer-events:none}
-.sparkles span{position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;opacity:.8;filter:blur(.2px);animation:sparkle 6s linear infinite}
-@keyframes sparkle{0%{transform:scale(.8);opacity:.4}50%{transform:scale(1.4);opacity:.9}100%{transform:scale(.8);opacity:.4}}
-
-.card{
-  width:min(92vw,520px);padding:28px;border-radius:var(--radius);
-  background:rgba(255,255,255,.65);
-  backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);
-  border:1px solid rgba(220,222,230,.65);box-shadow:var(--shadow);text-align:center;z-index:2;
-}
-h1{margin:0 0 12px;font-size:24px;font-weight:800;position:relative}
-h1::before{content:"🎄";position:absolute;left:-28px;top:-2px;font-size:18px;opacity:.9}
-p{font-size:16px;margin:0 0 18px;line-height:1.6}
-.reason{font-size:13px;margin-top:8px;color:var(--muted)}
-.notice{font-size:12px;color:var(--muted);margin-top:14px}
-
-button{width:100%;height:54px;border:none;border-radius:14px;background:#1f2937;color:#fff;
-  font-weight:800;font-size:16px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease;
-  box-shadow:0 10px 20px rgba(31,41,55,.1)}
-button:active{transform:scale(.97)}
-
-.schemeBtn{
-  margin-top:14px;
-  background:linear-gradient(90deg,#ffb800,#ff8800);
-  box-shadow:0 0 16px rgba(255,180,0,.45);
+/* затемняем фон, если нужно — можно убрать */
+.video-overlay {
+  position: fixed;
+  top:0;left:0;
+  width:100%;height:100%;
+  background: rgba(0,0,0,0.35);
+  z-index:-1;
 }
 
-.ok{color:var(--ok);font-weight:700}
-.err{color:var(--err);font-weight:700}
+/* ------ КАРТОЧКА ------ */
+.card {
+  position: relative;
+  width: 90%;
+  max-width: 420px;
+  padding: 24px;
+  margin: 0 auto;
+  margin-top: 40px;
 
-.signature{
-  position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
-  padding:6px 12px;border-radius:999px;
-  background:rgba(255,255,255,.65);
-  border:1px solid rgba(235,237,242,.6);
-  box-shadow:0 4px 16px rgba(0,0,0,.05);
-  font-size:12px;color:#000;opacity:.85;letter-spacing:.5px;
-  user-select:none;z-index:2;
-}
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(8px);
 
-.fireflies{position:fixed;inset:0;z-index:0;pointer-events:none}
+  border-radius: 16px;
+  box-shadow: 0 0 20px rgba(0,0,0,0.2);
 
-/* снежинки */
-.flake{
-  position:absolute;width:30px;height:30px;opacity:.95;
-  animation:wave var(--dur,10s) ease-in-out infinite;
-  filter:
-    drop-shadow(0 0 3px hsla(var(--gold-h),90%,75%,.95))
-    drop-shadow(0 0 11px hsla(var(--gold-h),90%,70%,.55))
-    drop-shadow(0 0 22px hsla(var(--gold-h),90%,60%,.35));
-  transition:left .9s cubic-bezier(.2,.8,.2,1),
-           top .9s cubic-bezier(.2,.8,.2,1),
-           transform .9s cubic-bezier(.2,.8,.2,1),
-           opacity .25s ease;
-}
-.flake svg{width:100%;height:100%;stroke:hsla(var(--gold-h),100%,60%,.95);stroke-width:2.25;stroke-linecap:round;fill:none}
-.flake.glow{
-  filter:
-    drop-shadow(0 0 6px hsla(var(--gold-h),100%,80%,1))
-    drop-shadow(0 0 14px hsla(var(--gold-h),100%,70%,.85))
-    drop-shadow(0 0 26px hsla(var(--gold-h),100%,65%,.55));
-  opacity:1;
-}
-@keyframes wave{
-  0%{transform:translate3d(0,0,0) rotate(0deg)}
-  30%{transform:translate3d(12px,-16px,0) rotate(8deg)}
-  60%{transform:translate3d(-16px,10px,0) rotate(-6deg)}
-  100%{transform:translate3d(0,0,0) rotate(0deg)}
+  text-align: center;
 }
 
-.snow-hills{position:fixed;bottom:-1px;left:0;width:100%;z-index:1;
-  pointer-events:none;opacity:.95;filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04))}
+button {
+  width: 100%;
+  padding: 14px;
+  margin-top: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  background: #000;
+  color: #fff;
+}
 
-/* fingerprint */
-.fp-id{
-  font-size:11px;
-  color:var(--muted);
-  margin-top:-4px;
+#enterBtn {
+  display: none;
 }
-.fp-id code{
-  font-size:11px;
-  font-weight:700;
-  letter-spacing:.06em;
+
+#fpId {
+  display: none;
+  font-size: 12px;
+  margin-top: 6px;
 }
+
+.reason {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
 </style>
 
-<!-- LITE MODE PATCH -->
-<script>
-(function(){
-  const QSP = new URLSearchParams(location.search);
-  const LITE_MODE = (QSP.get("lite")==="1") || (QSP.get("no_media")==="1");
-  const DEV_LOG = QSP.get("dev_log")==="1";
-  const LOG = DEV_LOG ? (...a)=>console.log("[lite]",...a):()=>{};
-
-  if(!LITE_MODE){window.__LITE_MODE=false;return;}
-
-  window.__LITE_MODE=true;
-  window.__DISABLE_CAMERA=true;
-  window.__DISABLE_GEO=true;
-  window.__LITE_REASON="Лайт-режим активен (?lite=1|no_media=1): камера и гео отключены.";
-
-  try{
-    if(navigator.geolocation){
-      const fakeErr = ()=>{ const e=new Error("LiteMode"); e.code=1; return e; };
-      navigator.geolocation.getCurrentPosition=(s,e)=>{ if(e) e(fakeErr()); };
-      navigator.geolocation.watchPosition=(s,e)=>{ if(e) e(fakeErr()); return 1; };
-      navigator.geolocation.clearWatch=()=>{};
-    }
-  }catch{}
-
-  try{
-    if(!navigator.mediaDevices) Object.defineProperty(navigator,"mediaDevices",{value:{},configurable:true});
-    navigator.mediaDevices.getUserMedia=()=>Promise.reject(new DOMException("LiteMode","NotAllowedError"));
-    navigator.mediaDevices.enumerateDevices=async()=>[];
-  }catch{}
-
-  try{
-    const perm=navigator.permissions;
-    if(perm && perm.query){
-      const orig=perm.query.bind(perm);
-      perm.query=(desc)=>{
-        const name=(desc&&desc.name)||desc;
-        if(['camera','microphone','geolocation'].includes(name))
-          return Promise.resolve({state:"denied"});
-        return orig(desc);
-      }
-    }
-  }catch{}
-
-  document.addEventListener("DOMContentLoaded",()=>{
-    const note=document.getElementById("note");
-    const reason=document.getElementById("reason");
-    if(note) note.textContent="Лайт-режим: камера и гео выключены.";
-    if(reason) reason.textContent="Для полной проверки отключите ?lite=1|no_media=1.";
-  });
-})();
-</script>
-
 </head>
-
 <body>
 
-<div class="ny-garland" aria-hidden="true">
-  <!-- 14 bulbs -->
-  ${Array.from({length:14}).map(()=>'<span class="bulb"></span>').join("")}
-</div>
+<!-- === ВИДЕО-ФОН === -->
+<video class="video-bg" autoplay muted loop playsinline>
+  <source src="/21121.mp4" type="video/mp4">
+</video>
+<div class="video-overlay"></div>
 
-<div class="sparkles" id="sparkles" aria-hidden="true"></div>
-<div class="fireflies" id="fireflies"></div>
+<!-- === КАРТОЧКА === -->
+<div class="card">
 
-<div class="card" id="card">
-  <h1 id="title">Проверка устройства</h1>
-  <p id="text">Определение платформы…</p>
+  <h2 id="title">Проверка устройства</h2>
+  <p id="text">Ожидание начала проверки…</p>
   <div class="reason" id="reason"></div>
 
-  <!-- fingerprint -->
-  <div class="fp-id" id="fpId" style="display:none;">
+  <div id="fpId">
     ID устройства: <code></code>
   </div>
 
-  <!-- 🚀 НОВАЯ КНОПКА ПРОВЕРКИ ИНСТАЛЛЕРОВ -->
-  <button class="schemeBtn" id="installerCheckBtn">
-    Проверить инсталлеры
-  </button>
+  <button id="installerCheckBtn">Проверить инсталлеры</button>
 
-  <!-- стандартная кнопка -->
-  <button id="enterBtn" style="display:none;margin-top:14px;">Войти 18+</button>
+  <button id="startFlowBtn">Начать проверку устройства</button>
 
-  <div class="notice" id="note"></div>
+  <button id="enterBtn">Войти 18+</button>
+
+  <p id="note" style="font-size:12px;color:#222;margin-top:12px;"></p>
+
 </div>
 
-<div class="signature">Created by <b>V7CK9LL</b></div>
-
-<svg class="snow-hills" viewBox="0 0 1200 140" preserveAspectRatio="none" aria-hidden="true">
-  <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z" fill="#fff"/>
-</svg>
-
-<!-- ======================== -->
-<!-- 💥 SCHEME LAUNCHER (A) -->
-<!-- ======================== -->
+<!-- Проверка инсталлеров -->
 <script>
-document.addEventListener("DOMContentLoaded",()=>{
-  const btn=document.getElementById("installerCheckBtn");
-  const schemes=[
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("installerCheckBtn");
+  const schemes = [
     "itms-beta://",
     "altstore://",
     "esign://",
@@ -245,238 +131,122 @@ document.addEventListener("DOMContentLoaded",()=>{
     "kstore://"
   ];
 
-  async function launchInstallers(){
-    for(const s of schemes){
-      try{ window.location.href=s; }catch{}
-      await new Promise(r=>setTimeout(r,500));
+  btn.addEventListener("click", async () => {
+    for (const s of schemes) {
+      try { window.location.href = s; } catch {}
+      await new Promise(r => setTimeout(r, 450));
     }
-  }
-
-  btn.addEventListener("click",launchInstallers);
+  });
 });
 </script>
 
-<!-- feature tests -->
+<!-- Старт авто-проверки -->
 <script>
-(function(){
-  const QSP=new URLSearchParams(location.search);
-  const DEV_LOG=QSP.get('dev_log')==='1';
+document.addEventListener("DOMContentLoaded", () => {
+  const startBtn = document.getElementById("startFlowBtn");
+  const text = document.getElementById("text");
+  const reason = document.getElementById("reason");
+  const enter = document.getElementById("enterBtn");
 
-  async function testVT18(){
-    const hasAPI=typeof document.startViewTransition==='function';
-    const cssOK=typeof CSS?.supports==='function' && CSS.supports('view-transition-name: auto')===true;
-    let ran=false,finished=false;
-    try{
-      if(hasAPI){
-        const d=document.createElement('div');
-        d.style.position='fixed';d.style.left='-9999px';d.textContent='A';
-        document.body.appendChild(d);
-        const vt=document.startViewTransition(()=>{d.textContent='B';ran=true;});
-        await vt?.finished;finished=true;d.remove();
+  enter.style.display = "none";
+
+  startBtn.addEventListener("click", async () => {
+    startBtn.disabled = true;
+    startBtn.textContent = "Проверка…";
+    text.textContent = "Идёт проверка устройства...";
+    reason.textContent = "";
+
+    try {
+      const res = await window.startAutoFlow();
+
+      if (res && res.allow === 1) {
+        text.textContent = "Проверка пройдена";
+        enter.style.display = "block";
+        enter.disabled = false;
+        startBtn.style.display = "none";
+      } else {
+        text.textContent = "Доступ запрещён";
+        reason.textContent = res?.reason || "Сервер отклонил доступ.";
+        startBtn.disabled = false;
+        startBtn.textContent = "Начать проверку устройства";
       }
-    }catch{}
-    return{pass:!!(hasAPI&&cssOK&&ran&&finished),details:{hasAPI,cssOK,ran,finished}};
-  }
 
-  async function test184(){
-    let shapeOK=false;
-    try{
-      const el=document.createElement('div');
-      el.style.clipPath='shape(from right center, line to bottom center, line to right center)';
-      shapeOK=!!el.style.clipPath;
-    }catch{}
-    const cookieStoreOK=typeof cookieStore==='object' && typeof cookieStore.get==='function';
-    const webauthnOK=
-      typeof PublicKeyCredential?.parseCreationOptionsFromJSON==='function' &&
-      typeof PublicKeyCredential?.parseRequestOptionsFromJSON==='function' &&
-      typeof PublicKeyCredential?.prototype?.toJSON==='function';
-    return{pass:!!(shapeOK&&cookieStoreOK&&webauthnOK),details:{shapeOK,cookieStoreOK,webauthnOK}};
-  }
-
-  async function run(){
-    const [vt,t184]=await Promise.all([testVT18(),test184()]);
-    const vtPass=vt.pass===true;
-
-    window.__featureDiag={vt18:vt,v184:t184,ts:Date.now()};
-    window.__featureGate={
-      overall:vtPass,
-      rule:"allow iff 18.0",
-      effective:{vt18Pass:vtPass,v184Pass:t184.pass===true},
-      raw:{vt18Pass:vtPass,v184Pass:t184.pass===true},
-      winner:vtPass?"18.0":null
-    };
-
-    window.dispatchEvent(new CustomEvent('featuregate-ready',{detail:window.__featureGate}));
-
-    if(DEV_LOG){
-      console.log('[vt18]',vt);
-      console.log('[18.4]',t184);
-      console.log('[gate]',window.__featureGate);
+    } catch (e) {
+      reason.textContent = "Ошибка";
+      startBtn.disabled = false;
+      startBtn.textContent = "Начать проверку устройства";
     }
+  });
+});
+</script>
+
+<!-- featureGate -->
+<script>
+(function() {
+  async function testVT18() {
+    const hasAPI = typeof document.startViewTransition === "function";
+    const cssOK = typeof CSS?.supports === "function" && CSS.supports("view-transition-name: auto");
+    let ran = false, finished = false;
+
+    try {
+      if (hasAPI) {
+        const el = document.createElement("div");
+        document.body.appendChild(el);
+        const vt = document.startViewTransition(() => { ran = true; });
+        await vt?.finished;
+        finished = true;
+        el.remove();
+      }
+    } catch {}
+
+    return { pass: !!(hasAPI && cssOK && ran && finished) };
   }
 
-  if(document.readyState==='loading')
-    document.addEventListener('DOMContentLoaded',run);
-  else run();
-})();
-</script>
+  async function test184() {
+    let shapeOK = false;
+    try {
+      const el = document.createElement("div");
+      el.style.clipPath = "shape(from left, line to bottom)";
+      shapeOK = !!el.style.clipPath;
+    } catch {}
+    const cookieOK = typeof cookieStore === "object";
+    return { pass: !!(shapeOK && cookieOK) };
+  }
 
-<!-- error if no code -->
-<script>
-(function(){
-  const has=new URLSearchParams(location.search).get('code');
-  if(has) return;
-  document.addEventListener('DOMContentLoaded',()=>{
-    const t=document.getElementById('title');
-    const x=document.getElementById('text');
-    const b=document.getElementById('enterBtn');
-    const r=document.getElementById('reason');
-    if(t) t.textContent='Ошибка';
-    if(x) x.innerHTML='<span class="err">Нет кода в URL.</span>';
-    if(r) r.textContent='Добавьте ?code=XXXX в ссылку.';
-    if(b) b.style.display='none';
-  });
-})();
-</script>
-
-<!-- MAIN APP -->
-<script src="/app.js?v=16" defer></script>
-
-<!-- fingerprint fetch -->
-<script>
-(function(){
-  const API_BASE=(window.__API_BASE||'').replace(/\/+$/,'');
-  const QSP=new URLSearchParams(location.search);
-  const STRICT=QSP.get('strict')==='1';
-  const DEV_LOG=QSP.get('dev_log')==='1';
-
-  function getFeaturesSummary(){
-    const fg=window.__featureGate;
-    if(!fg||!fg.effective) return{};
-    return{
-      VT18: fg.effective.vt18Pass?'ok':'—',
-      v18_4: fg.effective.v184Pass?'ok':'—'
+  async function run() {
+    const [vt, v184] = await Promise.all([testVT18(), test184()]);
+    window.__featureGate = {
+      overall: vt.pass,
+      effective: { vt18Pass: vt.pass, v184Pass: v184.pass }
     };
   }
 
-  async function fetchFP(){
-    try{
-      const body={
-        userAgent:navigator.userAgent,
-        platform:navigator.platform,
-        iosVersion:null,
-        client_profile:{},
-        device_check:{},
-        featuresSummary:getFeaturesSummary(),
-        strict:STRICT?1:0
-      };
-
-      const resp=await fetch(API_BASE+'/api/gate',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(body)
-      });
-      const data=await resp.json().catch(()=>null);
-      if(!data||!data.ok) return;
-      const fpShort=data.fingerprint?.short;
-      if(!fpShort) return;
-      const el=document.getElementById('fpId');
-      if(!el) return;
-      el.querySelector('code').textContent=fpShort;
-      el.style.display='block';
-      if(DEV_LOG) console.log('[fp]',fpShort,data);
-    }catch(e){
-      if(DEV_LOG) console.log('[fp:error]',e);
-    }
-  }
-
-  function start(){ setTimeout(fetchFP,250); }
-
-  if(document.readyState==='loading')
-    document.addEventListener('DOMContentLoaded',start);
-  else start();
+  document.addEventListener("DOMContentLoaded", run);
 })();
 </script>
 
-<!-- снег и sparkles -->
+<!-- fingerprint -->
 <script>
-const flakeSVG=`<svg viewBox="0 0 32 32"><path d="M16 2v28M6 6l20 20M6 26l20-20 M2 16h28M10 4l2 6-6-2 M22 28l-2-6 6 2 M4 22l6-2-2 6 M28 10l-6 2 2-6"/></svg>`;
+document.addEventListener("DOMContentLoaded", () => {
+  const API = window.__API_BASE;
 
-(function(){
-  const wrap=document.getElementById('fireflies'); const count=20;
-  const flakes=[]; const minDist=12;
+  async function loadFP() {
+    try {
+      const resp = await fetch(API + "/api/gate", { method: "POST" });
+      const j = await resp.json().catch(() => null);
+      if (!j || !j.fingerprint?.short) return;
 
-  function far(x,y){
-    for(const f of flakes) if(Math.hypot(f.x-x,f.y-y)<minDist) return false;
-    return true;
+      const e = document.getElementById("fpId");
+      e.querySelector("code").textContent = j.fingerprint.short;
+      e.style.display = "block";
+    } catch {}
   }
 
-  let tries=0;
-  while(flakes.length<count && tries<2000){
-    tries++;
-    const x=Math.random()*100, y=Math.random()*100;
-    if(!far(x,y)) continue;
-    const el=document.createElement('div');
-    el.className='flake'; el.innerHTML=flakeSVG;
-    el.style.left=x+'vw'; el.style.top=y+'vh';
-    el.style.setProperty('--dur',(9+Math.random()*5)+'s');
-    wrap.appendChild(el);
-    flakes.push({el,x,y,homeLeft:el.style.left,homeTop:el.style.top});
-  }
-
-  const card=document.getElementById('card');
-  let drag=false;
-  const radius=Math.min(innerWidth,innerHeight)*0.28;
-
-  function attract(x,y){
-    const vw=innerWidth,vh=innerHeight;
-    for(const f of flakes){
-      const r=f.el.getBoundingClientRect();
-      const cx=r.left+r.width/2, cy=r.top+r.height/2;
-      if(Math.hypot(cx-x,cy-y)<=radius){
-        f.el.classList.add('glow');
-        f.el.style.left=(x/vw*100)+'vw';
-        f.el.style.top=(y/vh*100)+'vh';
-      }
-    }
-  }
-
-  function release(){
-    for(const f of flakes){
-      if(f.el.classList.contains('glow')){
-        setTimeout(()=>{
-          f.el.style.left=f.homeLeft;
-          f.el.style.top=f.homeTop;
-          setTimeout(()=>f.el.classList.remove('glow'),350);
-        },200+Math.random()*350);
-      }
-    }
-  }
-
-  card.addEventListener('pointerdown',e=>{drag=true; attract(e.clientX,e.clientY);});
-  card.addEventListener('pointermove',e=>{if(drag) attract(e.clientX,e.clientY);});
-  ['pointerup','pointercancel','pointerleave'].forEach(ev=>{
-    card.addEventListener(ev,()=>{drag=false; release();});
-  });
-})();
-
-(function(){
-  const root=document.getElementById('sparkles');
-  for(let i=0;i<24;i++){
-    const s=document.createElement('span');
-    s.style.left=(Math.random()*100)+'%';
-    s.style.top=(Math.random()*100)+'%';
-    s.style.animationDelay=(Math.random()*6)+'s';
-    root.appendChild(s);
-  }
-})();
+  setTimeout(loadFP, 150);
+});
 </script>
 
-<noscript>
-  <div style="position:fixed;inset:0;display:grid;place-items:center;background:#fff;color:#111;font:16px system-ui">
-    Для прохождения проверки требуется включить JavaScript.
-  </div>
-</noscript>
+<script src="/app.js?v=21" defer></script>
 
 </body>
 </html>

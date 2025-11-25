@@ -1019,12 +1019,13 @@ async function autoFlow() {
 // =====================================
 // INIT
 // =====================================
-function startWithGate() {
-  setTimeout(() => autoFlow(), 60);
-}
+// =====================================
+// INIT — запуск только по кнопке
+// =====================================
 
-if (document.readyState === "complete" || document.readyState === "interactive") {
-  startWithGate();
-} else {
-  document.addEventListener("DOMContentLoaded", startWithGate);
-}
+window.startAutoFlow = async function () {
+  return await autoFlow();
+};
+
+// никаких автозапусков!
+
