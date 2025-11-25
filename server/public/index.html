@@ -5,21 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Проверка устройства 18+</title>
 
+<!-- API base -->
 <script>
   window.__API_BASE = location.origin.replace(/\/+$/, "");
 </script>
 
+<!-- Красивый шрифт -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
 <style>
-/* ------ ФОН ВИДЕО ------ */
+/* ===== OS BASE ===== */
 body, html {
   padding: 0;
   margin: 0;
   height: 100%;
   width: 100%;
   overflow: hidden;
-  font-family: system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #000;
+  letter-spacing: 0.3px;
 }
 
+/* ===== VIDEO BG ===== */
 .video-bg {
   position: fixed;
   top: 0;
@@ -29,8 +36,6 @@ body, html {
   object-fit: cover;
   z-index: -1;
 }
-
-/* затемняем фон, если нужно — можно убрать */
 .video-overlay {
   position: fixed;
   top:0;left:0;
@@ -39,68 +44,132 @@ body, html {
   z-index:-1;
 }
 
-/* ------ КАРТОЧКА ------ */
+/* ===== CARD ===== */
 .card {
   position: relative;
   width: 90%;
   max-width: 420px;
-  padding: 24px;
-  margin: 0 auto;
-  margin-top: 40px;
+  margin: 22vh auto 0 auto;
+  padding: 28px;
 
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(8px);
-
-  border-radius: 16px;
-  box-shadow: 0 0 20px rgba(0,0,0,0.2);
+  background: rgba(255, 255, 255, 0.60);
+  backdrop-filter: blur(14px);
+  border-radius: 20px;
+  box-shadow: 0 0 24px rgba(0,0,0,0.25);
 
   text-align: center;
 }
 
-button {
-  width: 100%;
-  padding: 14px;
-  margin-top: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  border-radius: 10px;
-  border: none;
-  cursor: pointer;
-  background: #000;
-  color: #fff;
+/* ===== HEAD ===== */
+h2 {
+  font-weight: 700;
+  font-size: 22px;
+  text-transform: uppercase;
+  letter-spacing: 1.1px;
+  margin-bottom: 10px;
 }
 
-#enterBtn {
-  display: none;
+/* ===== TEXT ===== */
+#text {
+  font-size: 15px;
+  font-weight: 400;
+  opacity: 0.85;
 }
 
+.reason {
+  margin-top: 4px;
+  font-size: 13px;
+  opacity: .85;
+}
+
+/* ===== FINGERPRINT ===== */
 #fpId {
   display: none;
   font-size: 12px;
   margin-top: 6px;
+  opacity: 0.75;
 }
 
-.reason {
-  font-size: 13px;
-  margin-top: 4px;
+/* ===== CREATOR ===== */
+.creator {
+  margin-top: 18px;
+  font-size: 12px;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
+/* ===== BUTTONS — GLASS + GRADIENT ===== */
+button {
+  width: 100%;
+  padding: 14px;
+  margin-top: 16px;
+
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+
+  /* стекло */
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(12px);
+
+  color: #fff;
+
+  border: 1px solid rgba(255,255,255,0.28);
+
+  /* анимированный градиент */
+  background-image: linear-gradient(
+    120deg,
+    rgba(255,255,255,0.28),
+    rgba(255,255,255,0.05),
+    rgba(255,255,255,0.28)
+  );
+  background-size: 200% 200%;
+  animation: gradientFlow 4s ease infinite;
+
+  box-shadow: 0 4px 22px rgba(255,255,255,0.14);
+
+  transition: transform 0.25s ease, box-shadow 0.3s ease, opacity 0.3s;
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 30px rgba(255,255,255,0.35);
+  opacity: 0.93;
+}
+button:active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 2px 18px rgba(255,255,255,0.22);
+}
+
+/* gradient move */
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
 </style>
-
 </head>
+
 <body>
 
-<!-- === ВИДЕО-ФОН === -->
+<!-- ===== VIDEO BG ===== -->
 <video class="video-bg" autoplay muted loop playsinline>
   <source src="/21121.mp4" type="video/mp4">
 </video>
 <div class="video-overlay"></div>
 
-<!-- === КАРТОЧКА === -->
+<!-- ===== CARD ===== -->
 <div class="card">
 
   <h2 id="title">Проверка устройства</h2>
   <p id="text">Ожидание начала проверки…</p>
+
   <div class="reason" id="reason"></div>
 
   <div id="fpId">
@@ -111,13 +180,13 @@ button {
 
   <button id="startFlowBtn">Начать проверку устройства</button>
 
-  <button id="enterBtn">Войти 18+</button>
+  <button id="enterBtn" style="display:none;">Войти 18+</button>
 
-  <p id="note" style="font-size:12px;color:#222;margin-top:12px;"></p>
+  <div class="creator">creator: @v7ck9ll</div>
 
 </div>
 
-<!-- Проверка инсталлеров -->
+<!-- ========== INSTALLER CHECK ========== -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("installerCheckBtn");
@@ -140,7 +209,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
-<!-- Старт авто-проверки -->
+<!-- ========= AUTO FLOW ========== -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const startBtn = document.getElementById("startFlowBtn");
@@ -151,27 +220,38 @@ document.addEventListener("DOMContentLoaded", () => {
   enter.style.display = "none";
 
   startBtn.addEventListener("click", async () => {
+
     startBtn.disabled = true;
     startBtn.textContent = "Проверка…";
     text.textContent = "Идёт проверка устройства...";
     reason.textContent = "";
 
     try {
-      const res = await window.startAutoFlow();
+      const res = await window.startAutoFlow(); // твой app.js
 
-      if (res && res.allow === 1) {
+      const canLaunch =
+        res?.decision?.canLaunch === true ||
+        res?.allow === 1;
+
+      const failReason =
+        res?.risk?.reasons?.[0]?.text ||
+        res?.decision?.reason ||
+        res?.reason ||
+        "Сервер отклонил доступ.";
+
+      if (canLaunch) {
         text.textContent = "Проверка пройдена";
         enter.style.display = "block";
         enter.disabled = false;
         startBtn.style.display = "none";
       } else {
         text.textContent = "Доступ запрещён";
-        reason.textContent = res?.reason || "Сервер отклонил доступ.";
+        reason.textContent = failReason;
         startBtn.disabled = false;
         startBtn.textContent = "Начать проверку устройства";
       }
 
-    } catch (e) {
+    } catch(e) {
       reason.textContent = "Ошибка";
       startBtn.disabled = false;
       startBtn.textContent = "Начать проверку устройства";
@@ -180,14 +260,14 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
-<!-- featureGate -->
+<!-- ========== FEATUREGATE ========== -->
 <script>
 (function() {
   async function testVT18() {
     const hasAPI = typeof document.startViewTransition === "function";
-    const cssOK = typeof CSS?.supports === "function" && CSS.supports("view-transition-name: auto");
+    const cssOK = typeof CSS?.supports === "function" &&
+                   CSS.supports("view-transition-name: auto");
     let ran = false, finished = false;
-
     try {
       if (hasAPI) {
         const el = document.createElement("div");
@@ -198,7 +278,6 @@ document.addEventListener("DOMContentLoaded", () => {
         el.remove();
       }
     } catch {}
-
     return { pass: !!(hasAPI && cssOK && ran && finished) };
   }
 
@@ -214,10 +293,17 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function run() {
-    const [vt, v184] = await Promise.all([testVT18(), test184()]);
+    const [vt, v184] = await Promise.all([
+      testVT18(),
+      test184()
+    ]);
+
     window.__featureGate = {
       overall: vt.pass,
-      effective: { vt18Pass: vt.pass, v184Pass: v184.pass }
+      effective: {
+        vt18Pass: vt.pass,
+        v184Pass: v184.pass
+      }
     };
   }
 
@@ -225,14 +311,14 @@ document.addEventListener("DOMContentLoaded", () => {
 })();
 </script>
 
-<!-- fingerprint -->
+<!-- ========== FINGERPRINT ========== -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const API = window.__API_BASE;
 
   async function loadFP() {
     try {
-      const resp = await fetch(API + "/api/gate", { method: "POST" });
+      const resp = await fetch(API + "/api/gate", { method:"POST" });
       const j = await resp.json().catch(() => null);
       if (!j || !j.fingerprint?.short) return;
 
@@ -246,6 +332,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
+<!-- твой основной app.js -->
 <script src="/app.js?v=21" defer></script>
 
 </body>
