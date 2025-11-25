@@ -3,230 +3,162 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Проверка устройства 18+</title>
+<title>Проверка 18+</title>
 
 <script>
   window.__API_BASE = location.origin.replace(/\/+$/, "");
 </script>
 
 <style>
-/* ===== BASE ===== */
 html, body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-family: system-ui, sans-serif;
+  margin:0;
+  padding:0;
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  font-family:system-ui,sans-serif;
 }
 
-/* ===== BACKGROUND VIDEO ===== */
-.video-bg {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  z-index: -2;
+/* Видео задник */
+video.bg {
+  position:fixed;
+  top:0;left:0;
+  width:100%;height:100%;
+  object-fit:cover;
+  z-index:-2;
+}
+div.overlay {
+  position:fixed;
+  top:0;left:0;
+  width:100%;height:100%;
+  background:rgba(0,0,0,0.45);
+  z-index:-1;
 }
 
-.video-overlay {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  background: rgba(0,0,0,0.45);
-  z-index: -1;
-}
-
-/* ===== CARD (GLASS) ===== */
+/* Стеклянная карта */
 .card {
-  width: 92%;
-  max-width: 420px;
-  padding: 26px 22px;
-
-  background: rgba(255,255,255,0.55);
-  backdrop-filter: blur(18px);
-
-  border-radius: 20px;
-  box-shadow: 0 0 38px rgba(0,0,0,0.35);
-
-  text-align: center;
-  animation: fadeIn 0.5s ease;
+  width:92%;
+  max-width:420px;
+  padding:26px 22px;
+  background:rgba(255,255,255,0.55);
+  backdrop-filter:blur(18px);
+  border-radius:22px;
+  box-shadow:0 0 32px rgba(0,0,0,0.35);
+  text-align:center;
 }
 
-@keyframes fadeIn {
-  from { opacity:0; transform: translateY(12px); }
-  to   { opacity:1; transform: translateY(0); }
-}
-
-/* ===== BUTTONS ===== */
 button {
-  width: 100%;
-  padding: 14px;
-  margin-top: 14px;
-
-  background: linear-gradient(90deg, #111, #000);
-  color: white;
-  font-size: 16px;
-  font-weight: 600;
-
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: 0.25s;
+  width:100%;
+  padding:14px;
+  margin-top:14px;
+  background:linear-gradient(90deg,#4f00ff,#00bfff);
+  border:none;
+  border-radius:12px;
+  color:white;
+  font-size:16px;
+  font-weight:600;
+  cursor:pointer;
+  transition:.25s;
 }
-
-button:hover:not(:disabled) {
-  filter: brightness(1.2);
-}
-
 button:disabled {
-  opacity: .55;
-  filter: grayscale(.6);
-  cursor: not-allowed;
+  opacity:.5;
+  filter:grayscale(.6);
+  cursor:not-allowed;
+}
+button:hover:not(:disabled){
+  filter:brightness(1.25);
 }
 
-#enterBtn { display: none; }
-
-.reason {
-  font-size: 13px;
-  margin-top: 4px;
-}
-
-#fpId {
-  display: none;
-  font-size: 12px;
-  margin-top: 8px;
-}
+#enterBtn { display:none; }
+#reason { font-size:13px;margin-top:4px; }
 </style>
 </head>
 
 <body>
 
-<!-- VIDEO -->
-<video class="video-bg" autoplay muted loop playsinline>
+<video class="bg" autoplay muted loop playsinline>
   <source src="/21121.mp4" type="video/mp4">
 </video>
-<div class="video-overlay"></div>
+<div class="overlay"></div>
 
-<!-- CARD -->
 <div class="card">
-
   <h2 id="title">Проверка устройства</h2>
-  <p id="text">Ожидание начала проверки…</p>
-
-  <div class="reason" id="reason"></div>
-
-  <div id="fpId">ID устройства: <code></code></div>
+  <p id="text">Ожидание…</p>
+  <div id="reason"></div>
 
   <button id="installerCheckBtn">Проверить инсталлеры</button>
-  <button id="startFlowBtn">Начать проверку устройства</button>
+  <button id="startFlowBtn">Начать проверку</button>
   <button id="enterBtn">Войти 18+</button>
 
-  <p id="note" style="font-size:12px;color:#111;margin-top:12px;"></p>
+  <p id="note" style="font-size:12px;color:#111;"></p>
 </div>
 
-<!-- INSTALLER CHECK -->
 <script>
-document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("installerCheckBtn");
-  const schemes = [
+// ===== КНОПКА ИНСТАЛЛЕРОВ =====
+document.getElementById("installerCheckBtn").onclick = async () => {
+  const s = [
     "itms-beta://",
     "altstore://",
     "esign://",
     "gbox://",
-    "gboxapp://",
     "ksign://",
     "kstore://"
   ];
-
-  btn.addEventListener("click", async () => {
-    for (const s of schemes) {
-      try { window.location.href = s; } catch {}
-      await new Promise(r => setTimeout(r, 450));
-    }
-  });
-});
-</script>
-
-<!-- MAIN FLOW LOGIC -->
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-
-  const startBtn = document.getElementById("startFlowBtn");
-  const text = document.getElementById("text");
-  const reason = document.getElementById("reason");
-  const enter = document.getElementById("enterBtn");
-
-  startBtn.addEventListener("click", async () => {
-
-    startBtn.disabled = true;
-    text.textContent = "Идёт проверка устройства...";
-    reason.textContent = "";
-
-    try {
-      const res = await window.startAutoFlow();
-
-      const canLaunch = res?.decision?.canLaunch === true;
-
-      // ==== ОШИБКА БЫЛА ЗДЕСЬ — теперь фиксировано ====
-
-      if (canLaunch) {
-        text.textContent = "Проверка пройдена ✓";
-        enter.style.display = "block";
-        enter.disabled = false;
-        startBtn.style.display = "none";
-        return;
-      }
-
-      // если запрещено — выводим причину
-      const failReason =
-        res?.risk?.reasons?.[0]?.text ||
-        res?.decision?.reason ||
-        "Сервер отклонил доступ.";
-
-      text.textContent = "Доступ запрещён";
-      reason.textContent = failReason;
-
-      startBtn.disabled = false;
-      startBtn.textContent = "Начать проверку устройства";
-
-    } catch (e) {
-      text.textContent = "Ошибка";
-      reason.textContent = e.message || "Неизвестная ошибка";
-      startBtn.disabled = false;
-      startBtn.textContent = "Начать проверку устройства";
-    }
-  });
-});
-</script>
-
-<!-- FINGERPRINT -->
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-  const API = window.__API_BASE;
-
-  async function loadFP() {
-    try {
-      const resp = await fetch(API + "/api/gate", { method: "POST" });
-      const j = await resp.json().catch(() => null);
-      if (!j || !j.fingerprint?.short) return;
-
-      const e = document.getElementById("fpId");
-      e.querySelector("code").textContent = j.fingerprint.short;
-      e.style.display = "block";
-    } catch {}
+  for (const x of s) {
+    try { location.href = x; } catch {}
+    await new Promise(r => setTimeout(r, 450));
   }
+};
 
-  setTimeout(loadFP, 150);
-});
+// ===== ГЛАВНАЯ ЛОГИКА =====
+document.getElementById("startFlowBtn").onclick = async () => {
+  const text   = document.getElementById("text");
+  const reason = document.getElementById("reason");
+  const enter  = document.getElementById("enterBtn");
+  const start  = document.getElementById("startFlowBtn");
+
+  start.disabled = true;
+  text.textContent = "Проверяем…";
+  reason.textContent = "";
+
+  try {
+    const res = await window.startAutoFlow();
+
+    const canLaunch = res?.decision?.canLaunch === true;
+
+    // 🔥 ПРАВИЛЬНОЕ УСЛОВИЕ
+    if (canLaunch) {
+      text.textContent = "Проверка пройдена ✓";
+      enter.style.display = "block";
+      enter.disabled = false;
+      start.style.display = "none";
+      return;
+    }
+
+    // Если сервер реально дал отказ
+    const fail =
+      res?.decision?.reason ||
+      res?.risk?.reasons?.[0]?.text ||
+      "Доступ запрещён сервером";
+
+    text.textContent = "Доступ запрещён";
+    reason.textContent = fail;
+
+    start.disabled = false;
+    start.textContent = "Начать заново";
+
+  } catch (e) {
+    text.textContent = "Ошибка";
+    reason.textContent = e.message || "Неизвестная ошибка";
+    start.disabled = false;
+  }
+};
+
 </script>
 
-<!-- MAIN APP.JS -->
-<script src="/app.js?v=999" defer></script>
-
+<script src="/app.js?v=99" defer></script>
 </body>
 </html>
