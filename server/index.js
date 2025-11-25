@@ -1,7 +1,8 @@
-// === server/index.js
+// === server/index.js (NO-JB VERSION) ===
 // Backend gate; VT18 required; 18.4 ignored for pass;
-// iPad desktop/MacIntel OK; jailbreak/flow-hard-fails;
+// iPad desktop/MacIntel OK;
 // multi-chat; человеко-понятный отчёт (RU/EN/both) + Fingerprint + anti-spoof.
+// !!! Полностью убран active-Jailbreak (jbProbesActive) из всех частей сервера !!!
 
 import 'dotenv/config';
 import express from 'express';
@@ -98,7 +99,7 @@ db.prepare(`
 db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_code_map_code ON user_code_map(code);`).run();
 db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_code_map_chat ON user_code_map(chat_id);`).run();
 
-// ==== helpers ====
+// ==== Helpers ====
 function requireAdminSecret(req, res, next) {
   const auth = req.headers['authorization'] || '';
   if (!ADMIN_API_SECRET || auth !== `Bearer ${ADMIN_API_SECRET}`) {
@@ -205,13 +206,7 @@ function parseIOSMajorFromUAUniversal(ua = '') {
   return null;
 }
 
-// URL-схемы, которые игнорируем (тестовые)
-const IGNORE_SCHEMES = [/^custom:/i, /^mytest:/i];
-function isIgnoredScheme(s = '') {
-  return IGNORE_SCHEMES.some(rx => rx.test(String(s)));
-}
-
-// Safari-like UA (iOS/macOS Safari, без Chromium/Firefox/прочего)
+// Safari-like UA (iOS/macOS Safari, без Chromium/Firefox)
 function isSafariLikeUA(ua = '') {
   ua = String(ua || '');
   return /Safari\//.test(ua)
@@ -229,7 +224,7 @@ function isIpadDesktop({ platform, userAgent, cp }) {
   const ua    = String(userAgent || '');
   const touch = Number(cp?.maxTouchPoints ?? cp?.navigator?.maxTouchPoints ?? 0);
   const flagIpad = cp?.isIpad === true || /iPad/i.test(ua);
-  const isMacPlat = /MacIntel/i.test(plat) || /\bMac\b/i.test(plat);
+  const isMacPlat = /MacIntel/i.test(plat);
   return isMacPlat && (touch > 1 || flagIpad);
 }
 
@@ -255,7 +250,7 @@ function pickIosVersion(iosVersion, cp, userAgent, platform) {
   return null;
 }
 
-// VT18 required; 18.4 только в отчёт
+// VT18 required; 18.4 only in report
 function normalizeFeatures_Strict18Only(featuresSummary) {
   const fv = featuresSummary || {};
   const tag = (x) => (x === true || String(x).toLowerCase() === 'ok') ? 'ok' : '—';
@@ -264,7 +259,7 @@ function normalizeFeatures_Strict18Only(featuresSummary) {
   return { VT18, v18_4: V184, ok: (VT18 === 'ok') };
 }
 
-// Жёсткие дисплейные аномалии (только невозможные комбинации)
+// Жёсткие дисплейные аномалии
 function detectDisplayHardAnomalies({ status, cp }) {
   const scr = cp?.locale?.screen || cp?.screen || null;
   const dpr = Number(cp?.locale?.dpr ?? cp?.dpr ?? 0) || null;
@@ -278,28 +273,28 @@ function detectDisplayHardAnomalies({ status, cp }) {
 
   if (/iPhone/i.test(plat) && scr.w >= 1024) {
     displaySpoofHard = true;
-    notes.push('iPhone platform with desktop-like width (>=1024px).');
+    notes.push('iPhone platform with desktop-like width >=1024px');
   }
 
   if (/iPad/i.test(plat) && scr.w && scr.w <= 400) {
     displaySpoofHard = true;
-    notes.push('iPad platform with unrealistically small width (<=400px).');
+    notes.push('iPad platform with unrealistic small width <=400px');
   }
 
   if (isIosUA(ua) && scr.w >= 1920 && scr.h >= 1080) {
     displaySpoofHard = true;
-    notes.push('iOS UA with 1920x1080+ desktop resolution.');
+    notes.push('iOS UA with 1920x1080+ desktop resolution');
   }
 
   if (isIosUA(ua) && dpr && dpr < 1) {
     displaySpoofHard = true;
-    notes.push('iOS UA with devicePixelRatio < 1.');
+    notes.push('iOS UA with DPR < 1');
   }
 
   return { displaySpoofHard, notes };
 }
 
-// VT18 spoof: VT18 ok, но не Safari-like / не Apple
+// VT18 spoof
 function detectVT18Spoof({ status, features }) {
   const ua = status.ua || '';
   const plat = status.platform || '';
@@ -311,18 +306,18 @@ function detectVT18Spoof({ status, features }) {
 
   if (!isSafariLikeUA(ua)) {
     hardSpoofVT18 = true;
-    notes.push('VT18 reported ok, but UA is not Safari-like.');
+    notes.push('VT18 ok but UA not Safari-like');
   }
 
   if (!/iPhone|iPad|Macintosh|MacIntel/i.test(ua + ' ' + plat)) {
     hardSpoofVT18 = true;
-    notes.push('VT18 reported ok, but platform is not Apple.');
+    notes.push('VT18 ok but platform not Apple');
   }
 
   return { hardSpoofVT18, notes };
 }
 
-// базовый статус без учёта risk/flags
+// === deriveStatus (NO JB) ===
 function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, features }) {
   const v = pickIosVersion(iosVersion, cp, userAgent, platform);
   const iosOk = v != null && v >= 18;
@@ -333,18 +328,11 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, featu
   const macIntelOk    = /MacIntel/i.test(plat);
   const platformOk    = classicOk || ipadDesktopOk || macIntelOk;
 
-  const jb        = cp?.jbProbesActive || {};
-  const jbRowsRaw = Array.isArray(jb.results) ? jb.results : [];
-  const jbRows    = jbRowsRaw.filter(r => !isIgnoredScheme(r?.scheme));
-  const anyOpened = jbRows.some(r => r?.opened === true);
+  // JB полностью удалён → всегда true
+  const jbOk    = true;
+  const jbLabel = 'none';
 
-  const labelRaw    = String(jb?.summary?.label || '').toLowerCase();
-  const labelsClean = new Set(['', 'n/a', 'negative', 'unlikely', 'none', 'clean', 'no', 'absent']);
-  const jbOk        = !anyOpened && labelsClean.has(labelRaw);
-  const jbLabel     = jbOk ? (labelRaw || 'negative') : (labelRaw || 'positive');
-
-  const dcWords = Array.isArray(cp?.dcIspKeywords) ? cp.dcIspKeywords.join(',') : '';
-  const dcOk    = !dcWords;
+  const dcOk = !(dc.dcIsp || dc.hosting || dc.datacenter);
 
   const perms  = cp?.permissions || {};
   const geoOk  = perms.geolocation === 'granted' || perms.geolocation === true;
@@ -353,57 +341,43 @@ function deriveStatus({ iosVersion, platform, userAgent, cp = {}, dc = {}, featu
 
   const featuresOk = features ? !!features.ok : true;
 
-  const canLaunch = iosOk && platformOk && jbOk && featuresOk;
+  const canLaunch = iosOk && platformOk && featuresOk;
 
   return {
     iosOk,
     platformOk,
-    jbOk,
+    jbOk,           // always true (JB removed)
+    jbLabel,        // always "none"
     dcOk,
     geoOk,
     camOk,
     micOk,
     featuresOk,
     features,
-    jbLabel,
-    dcWords,
     canLaunch,
     iosVersionDetected: v,
     ipadDesktopOk,
     macIntelOk,
     ua: String(userAgent || ''),
-    platform: plat,
-    _jb: { rows: jbRows, rowsRaw: jbRowsRaw, anyOpened }
+    platform: plat
   };
 }
+// === Part 2 — Flags, Reasons, Risk, Report Builder (NO-JB VERSION) ===
 
-// ==== Extended flags & reasons ====
-
-function getJbSchemesFromProfile(cp = {}) {
-  const jb  = cp.jbProbesActive || cp.jb || {};
-  const arr = Array.isArray(jb.results) ? jb.results : [];
-  const res = [];
-  for (const r of arr) {
-    if (!r) continue;
-    const scheme = String(r.scheme || '').trim();
-    if (!scheme || isIgnoredScheme(scheme)) continue;
-    if (r.opened) res.push(scheme);
-  }
-  return res;
-}
-
+// ==== FLAGS (NO JB) ====
 function buildFlags(cp = {}, dc = {}, status = {}, meta = {}) {
   const flags = {};
 
-  const ua = meta.userAgent || status.ua || cp.ua || '';
-  const platform = meta.platform || status.platform || cp.platform || '';
-  const feats = status.features || meta.features || {};
-
-  // In-app WebView — допустимый канал
+  // In-app WebView
   const inApp = cp.inAppWebView || {};
-  flags.inApp = !!(inApp.isInApp || (Array.isArray(inApp.any) && inApp.any.length) || cp.inApp || cp.inapp);
+  flags.inApp = !!(
+    inApp.isInApp ||
+    (Array.isArray(inApp.any) && inApp.any.length) ||
+    cp.inApp ||
+    cp.inapp
+  );
 
-  // Lite mode — не чита, просто инфо
+  // Lite mode
   flags.lite = !!(
     cp.liteMode ||
     cp.lite ||
@@ -412,9 +386,6 @@ function buildFlags(cp = {}, dc = {}, status = {}, meta = {}) {
     dc.liteMode ||
     dc.lite
   );
-
-  // Jailbreak / tools (active probes)
-  flags.jbSchemes = getJbSchemesFromProfile(cp);
 
   // Automation / Shortcuts
   const autoScore = Number(
@@ -442,7 +413,7 @@ function buildFlags(cp = {}, dc = {}, status = {}, meta = {}) {
 
   flags.automation = !!(autoStrong || autoShortcutBurst);
 
-  // Web API patched / runtime modified
+  // Web API patched
   const webApiPatchedCount = Number(
     cp.webApiPatchedCount ??
     dc.webApiPatchedCount ??
@@ -456,12 +427,9 @@ function buildFlags(cp = {}, dc = {}, status = {}, meta = {}) {
     cp.webApiPatchedStrong === true ||
     cp.runtimePatchedStrong === true;
 
-  flags.webApiPatched = !!(
-    webApiStrongFlag ||
-    webApiPatchedCount >= 3
-  );
+  flags.webApiPatched = !!(webApiStrongFlag || webApiPatchedCount >= 3);
 
-  // DevTools-like
+  // Devtools-like
   flags.devtoolsLike = !!(
     dc.devtoolsLike ||
     cp.devtoolsLike ||
@@ -483,197 +451,138 @@ function buildFlags(cp = {}, dc = {}, status = {}, meta = {}) {
     dc.flags?.includes?.('link_flow_mismatch')
   );
 
-  // Жёсткие спуфы по VT18/UA/платформе
-  const { hardSpoofVT18, notes: vt18Notes } = detectVT18Spoof({ status, features: feats });
+  // Hard VT18 spoof
+  const { hardSpoofVT18, notes: vt18Notes } = detectVT18Spoof({
+    status,
+    features: status.features
+  });
   flags.hardSpoofVT18 = hardSpoofVT18;
   if (vt18Notes.length) flags.hardSpoofVT18_notes = vt18Notes;
 
-  // Жёсткие аномалии по дисплею
-  const { displaySpoofHard, notes: dispNotes } = detectDisplayHardAnomalies({ status, cp });
+  // Hard display spoof
+  const { displaySpoofHard, notes: dispNotes } = detectDisplayHardAnomalies({
+    status,
+    cp
+  });
   flags.displaySpoofHard = displaySpoofHard;
   if (dispNotes.length) flags.displaySpoofHard_notes = dispNotes;
 
-  // JB probes заглушены при патченных WebAPI
-  const jb  = cp?.jbProbesActive || {};
-  const results = Array.isArray(jb.results)
-    ? jb.results.filter(r => !isIgnoredScheme(r?.scheme))
-    : [];
-  const anyOpened = results.some(r => r?.opened === true);
-  const label = String(jb.summary?.label || '').toLowerCase();
-  const suspiciousLabel =
-    label === 'possible' || label === 'error' || label === 'unknown';
-
-  const allTimeoutOrError = results.length > 0 && results.every(r => {
-    const reason = String(r?.reason || '').toLowerCase();
-    return (
-      reason.includes('timeout') ||
-      reason.includes('error') ||
-      reason.includes('exception') ||
-      reason.includes('set-src-exception')
-    );
-  });
-
-  flags.jbTampered = !!(
-    !anyOpened &&
-    results.length > 0 &&
-    flags.webApiPatched &&
-    (suspiciousLabel || allTimeoutOrError)
-  );
-
-  // Сведение жёстких
-  flags.hardSpoof =
-    !!flags.hardSpoofVT18 ||
-    !!flags.displaySpoofHard ||
-    !!flags.jbTampered;
-
-  // JB hard: явные JB-инструменты
-  flags.jbHard = (flags.jbSchemes || []).some(s =>
-    /cydia:|sileo:|filza:|ifile:|trollstore:|palera1n:|checkra1n:|dopamine:|altstore:|zbra:|undecimus:|odyssey:|chimera:|taurine:/i
-      .test(s)
-  );
+  // NO JB MODE → flags.jbHard = false ALWAYS
+  flags.jbHard = false;
+  flags.jbSchemes = [];
+  flags.jbTampered = false;
 
   return flags;
 }
 
+// ==== HUMAN REASONS (NO JB) ====
 function buildReasons(flags) {
   const reasons = [];
 
-  // 1. Hard: Jailbreak-инструменты
-  if (flags.jbHard && flags.jbSchemes?.length) {
-    reasons.push({
-      severity: 'HIGH',
-      code: 'JAILBREAK_SCHEMES_HARD',
-      text: tr(
-        `Обнаружены явные инструменты джейлбрейка/хака по URL-схемам: ${flags.jbSchemes.join(', ')}. Это надёжный признак модифицированного устройства, не требуемого для честной игры.`,
-        `Explicit jailbreak / hacking tools detected via URL schemes: ${flags.jbSchemes.join(', ')}. This is a strong indicator of a modified device not needed for fair gameplay.`
-      )
-    });
-  } else if (flags.jbSchemes?.length) {
-    reasons.push({
-      severity: 'MEDIUM',
-      code: 'JAILBREAK_SCHEMES',
-      text: tr(
-        `Обнаружены сторонние JB/utility-схемы: ${flags.jbSchemes.join(', ')}. Рекомендуется ручная проверка, возможно мод-девайс.`,
-        `Third-party JB/utility URL schemes detected: ${flags.jbSchemes.join(', ')}. Manual review recommended; device may be modified.`
-      )
-    });
-  }
-
-  // 2. Hard: VT18/UA/Platform spoof
+  // 1. Hard: VT18 spoof
   if (flags.hardSpoofVT18) {
     reasons.push({
       severity: 'HIGH',
       code: 'HARD_SPOOF_VT18',
       text: tr(
-        'VT18 отмечен как ok, но User-Agent/платформа не похожи на реальный Safari на iOS/macOS. Это указывает на спуфинг или эмулятор.',
-        'VT18 reported ok, but User-Agent/platform is not consistent with real Safari on iOS/macOS. This indicates spoofing or emulator usage.'
+        'VT18 отмечен как ok, но User-Agent/платформа не похожи на Safari на iOS/macOS — это указывает на спуфинг или эмулятор.',
+        'VT18 reported ok, but User-Agent/platform does not look like Safari on iOS/macOS — spoofing/emulator likely.'
       )
     });
   }
 
-  // 3. Hard: Невозможные дисплейные параметры
+  // 2. Hard: Display impossible
   if (flags.displaySpoofHard) {
     reasons.push({
       severity: 'HIGH',
       code: 'DISPLAY_SPOOF_HARD',
       text: tr(
-        'Обнаружены физически невозможные параметры экрана для заявленного устройства (разрешение/DPR). Высокая вероятность эмулятора или спуфинга.',
-        'Physically impossible screen parameters for the claimed device (resolution/DPR). High probability of emulator or spoofed environment.'
+        'Обнаружены физически невозможные параметры экрана для заявленного устройства.',
+        'Physically impossible display parameters for claimed device.'
       )
     });
   }
 
-  // 4. Hard-ish: JB tamper + WebAPI patched
-  if (flags.jbTampered && flags.webApiPatched) {
-    reasons.push({
-      severity: 'HIGH',
-      code: 'JB_TAMPER_RUNTIME',
-      text: tr(
-        'Активные JB-пробы выглядят искусственно заглушенными, при этом ключевые Web API пропатчены. Типичный признак anti-detect/cheat окружения.',
-        'Active jailbreak probes appear artificially suppressed while core Web APIs are patched. Typical pattern of anti-detect / cheat environment.'
-      )
-    });
-  }
-
-  // 5. Automation / Shortcuts
+  // 3. Automation / Shortcuts
   if (flags.automation) {
     reasons.push({
       severity: 'MEDIUM',
       code: 'AUTOMATION_SHORTCUT',
       text: tr(
-        'Обнаружены устойчивые признаки автоматизации или shortcut-сценариев (нечеловеческие тайминги, повторяемость). Сам по себе не авто-бан, но усиливает другие флаги.',
-        'Stable automation / shortcut patterns detected (non-human timings, repetitive flows). Not an auto-ban alone, but amplifies other signals.'
+        'Обнаружены стабильные признаки автоматизации / Shortcut сценариев.',
+        'Stable automation / shortcut patterns detected.'
       )
     });
   }
 
-  // 6. WebAPI patched
-  if (flags.webApiPatched && !flags.jbTampered && !flags.hardSpoofVT18) {
+  // 4. Web API patched
+  if (flags.webApiPatched) {
     reasons.push({
       severity: 'MEDIUM',
       code: 'RUNTIME_MODIFIED',
       text: tr(
-        'Часть ключевых Web API изменена (не native). Это может быть защитный софт или анти-детект, рекомендуется ручная оценка в сочетании с другими сигналами.',
-        'Some core Web APIs appear non-native. Could be protective/anti-detect tooling; review in combination with other signals.'
+        'Некоторые Web API выглядят изменёнными — возможно анти-детект или инструменты модификации среды.',
+        'Some core Web APIs appear modified — possibly anti-detect or runtime modification.'
       )
     });
   }
 
-  // 7. DevTools-like
+  // 5. DevTools-like
   if (flags.devtoolsLike) {
     reasons.push({
       severity: 'LOW',
       code: 'DEVTOOLS_ENV',
       text: tr(
-        'Окружение похоже на DevTools/эмулятор по размерам окна. Сам по себе не является основанием для блокировки.',
-        'Window metrics resemble DevTools/emulator. Not a standalone reason for blocking.'
+        'Признаки DevTools/эмулятора по размерам окна.',
+        'DevTools/emulator-like window metrics.'
       )
     });
   }
 
-  // 8. VPN / Proxy
+  // 6. VPN / Proxy
   if (flags.vpnOrProxy) {
     reasons.push({
       severity: 'LOW',
       code: 'VPN_PROXY',
       text: tr(
-        'Замечены признаки VPN/прокси/дата-центра. Это обычная практика, но в сочетании с другими сигналами повышает риск.',
-        'VPN / proxy / datacenter indicators observed. Common behavior, but raises risk when combined with other signals.'
+        'Обнаружены признаки VPN / Proxy / дата-центра.',
+        'VPN / proxy / datacenter indicators observed.'
       )
     });
   }
 
-  // 9. Link flow mismatch
+  // 7. Link flow mismatch
   if (flags.linkFlowMismatch) {
     reasons.push({
       severity: 'HIGH',
       code: 'LINK_FLOW_MISMATCH',
       text: tr(
-        'Цепочка переходов не совпадает с ожидаемым официальным потоком. Похоже на обход через сторонние или чит-сервисы.',
-        'Link flow does not match the expected official path. Indicates a likely bypass via third-party or cheat services.'
+        'Цепочка переходов не совпадает с ожидаемой — возможно обход или сторонний сервис.',
+        'Link flow mismatch — likely bypass or third-party service.'
       )
     });
   }
 
-  // 10. In-app / Lite пояснения
+  // 8. In-app OK
   if (flags.inApp) {
     reasons.push({
       severity: 'INFO',
       code: 'INAPP_OK',
       text: tr(
-        'Вход выполнен из встроенного браузера приложения (Telegram/IG/TikTok и т.п.). Это допустимый сценарий и не ухудшает оценку.',
-        'Entry from an in-app browser (Telegram/IG/TikTok etc.). This is an allowed scenario and does not worsen the risk score.'
+        'Вход выполнен из встроенного браузера приложения — это допустимо.',
+        'Entry from an in-app browser — acceptable.'
       )
     });
   }
 
+  // 9. Lite mode
   if (flags.lite) {
     reasons.push({
       severity: 'INFO',
       code: 'LITE_MODE',
       text: tr(
-        'Проверка выполнена в lite-режиме без камеры. Это снижает силу верификации, но не является основанием для блокировки.',
-        'Check was performed in lite mode without camera. This weakens verification but is not a standalone reason for blocking.'
+        'Проверка выполнена в lite-режиме без камеры.',
+        'Check in lite-mode (no camera).'
       )
     });
   }
@@ -681,17 +590,18 @@ function buildReasons(flags) {
   return reasons;
 }
 
+// ==== RISK ====
 function deriveScoreAndLabel(flags, reasons) {
   let risk = 0;
-  if (flags.jbHard)            risk += 60;
+
   if (flags.hardSpoofVT18)     risk += 50;
   if (flags.displaySpoofHard)  risk += 50;
-  if (flags.jbTampered)        risk += 40;
   if (flags.linkFlowMismatch)  risk += 35;
   if (flags.automation)        risk += 25;
   if (flags.webApiPatched)     risk += 15;
   if (flags.devtoolsLike)      risk += 10;
   if (flags.vpnOrProxy)        risk += 5;
+
   if (risk > 100) risk = 100;
 
   let label = 'clean';
@@ -701,39 +611,39 @@ function deriveScoreAndLabel(flags, reasons) {
   return { score: risk, label, reasons };
 }
 
-// Единое правило допуска
+// ==== ACCESS DECISION (NO JB) ====
 function evaluateDecision({ status, flags, risk, strictTriggered, strictFailed }) {
   let allow = !!status.canLaunch;
 
-  // strict режим (если включён)
-  if (strictTriggered && strictFailed) {
-    allow = false;
-  }
+  // strict-mode
+  if (strictTriggered && strictFailed) allow = false;
 
-  // Hard-флаги всегда режут
-  if (flags) {
-    if (flags.jbHard)            allow = false;
-    if (flags.hardSpoofVT18)     allow = false;
-    if (flags.displaySpoofHard)  allow = false;
-    if (flags.jbTampered)        allow = false;
-    if (flags.linkFlowMismatch)  allow = false;
-  }
+  // hard flags cut
+  if (flags.hardSpoofVT18)    allow = false;
+  if (flags.displaySpoofHard) allow = false;
+  if (flags.linkFlowMismatch) allow = false;
 
   return allow;
 }
 
+// ==== Pretty Reasons HTML ====
 function formatReasonsHtml(reasons) {
   if (!reasons || !reasons.length) {
     return `<p>${escapeHTML(tr(
-      'Подозрительных сигналов нет. Среда выглядит честной.',
-      'No suspicious signals. Environment looks clean.'
+      'Подозрительных сигналов нет.',
+      'No suspicious signals.'
     ))}</p>`;
   }
-  return '<ol>' + reasons.map(r =>
-    `<li><b>[${escapeHTML(r.severity)}]</b> ${escapeHTML(r.text)}</li>`
-  ).join('') + '</ol>';
+  return (
+    '<ol>' +
+    reasons.map(r =>
+      `<li><b>[${escapeHTML(r.severity)}]</b> ${escapeHTML(r.text)}</li>`
+    ).join('') +
+    '</ol>'
+  );
 }
 
+// ==== Chat IDs ====
 function getChatIdsForCode(code) {
   const C = String(code).toUpperCase();
   const ids = new Set();
@@ -748,30 +658,22 @@ function getChatIdsForCode(code) {
   return [...ids];
 }
 
-// HTML report
+// ==== HTML REPORT (NO JB) ====
+
 function buildHtmlReport({
   code, geo, userAgent, platform, iosVersion, isSafari,
   cp, dc, features, strictTriggered, strictFailed
 }) {
-  const s       = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features });
-  const flags   = buildFlags(cp, dc, s, { userAgent, platform, features });
-  const reasons = buildReasons(flags);
-  const risk    = deriveScoreAndLabel(flags, reasons);
-  const finalCanLaunch = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
-
-  const jb  = cp?.jbProbesActive || {};
-  const jbSum  = jb.summary || {};
-
-  const jbRows = Array.isArray(s?._jb?.rows)
-    ? s._jb.rows
-    : (Array.isArray(jb.results) ? jb.results.filter(r => !isIgnoredScheme(r?.scheme)) : []);
-
-  const jbFirst = jbRows.find(r => r?.opened === true) || null;
+  const status     = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features });
+  const flags      = buildFlags(cp, dc, status, { userAgent, platform, features });
+  const reasons    = buildReasons(flags);
+  const risk       = deriveScoreAndLabel(flags, reasons);
+  const canLaunch  = evaluateDecision({ status, flags, risk, strictTriggered, strictFailed });
 
   const fingerprint = buildFingerprint({
     userAgent,
     platform,
-    iosVersion: s.iosVersionDetected,
+    iosVersion: status.iosVersionDetected,
     cp,
     dc
   });
@@ -787,40 +689,17 @@ function buildHtmlReport({
             border-radius:12px; margin:10px 0; }
     .kv { display:grid; grid-template-columns:220px 1fr; gap:4px; }
     .kv div { padding:4px 6px; border-bottom:1px dashed rgba(0,0,0,0.12); }
-    table { border-collapse:collapse; width:100%; margin-top:4px; }
-    th, td { border:1px solid rgba(0,0,0,0.2); padding:6px 8px; text-align:left; vertical-align:top; }
-    th { background:rgba(0,0,0,0.06); }
     code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
     pre { white-space:pre-wrap; word-break:break-word; background:rgba(0,0,0,0.04);
           padding:10px; border-radius:10px; }
     .ok { color:#16a34a; font-weight:600; }
     .bad { color:#ef4444; font-weight:600; }
-    .soft { color:#2563eb; }
     .pill { display:inline-block; padding:1px 7px; border-radius:999px; background:rgba(0,0,0,0.06); margin-left:4px; }
-    .summary { font-size:13px; margin-top:4px; }
   `;
-
-  const jbInfo = s.jbOk
-    ? tr('Нет признаков джейлбрейка.', 'No jailbreak indicators.')
-    : (jbFirst?.scheme
-        ? tr(
-            `Отработала схема <code>${escapeHTML(jbFirst.scheme)}</code> (${escapeHTML(jbFirst.reason || 'signal')} ~${escapeHTML(jbFirst.durationMs || '0')}мс).`,
-            `Triggered scheme <code>${escapeHTML(jbFirst.scheme)}</code> (${escapeHTML(jbFirst.reason || 'signal')} ~${escapeHTML(jbFirst.durationMs || '0')}ms).`
-          )
-        : (Array.isArray(jbSum.reasons) && jbSum.reasons.length
-            ? tr(
-                `Признаки: <code>${escapeHTML(jbSum.reasons.join(', '))}</code>.`,
-                `Indicators: <code>${escapeHTML(jbSum.reasons.join(', '))}</code>.`
-              )
-            : tr('Сигналов нет.', 'No direct jailbreak signals.')));
 
   const reasonsBlock = `
     <div class="card">
       <h2>⚠️ ${escapeHTML(tr('Почему такое решение','Why this decision'))}</h2>
-      <p class="summary">${escapeHTML(tr(
-        'Ниже перечислены ключевые сигналы. Формулировки специально человеко-понятные, чтобы можно было показать игроку.',
-        'Key signals are listed below in human-readable form so this can be shared with the player if needed.'
-      ))}</p>
       ${formatReasonsHtml(reasons)}
       <p>${escapeHTML(tr('Риск-оценка','Risk score'))}: <b>${risk.score}</b>/100 &nbsp; Status: <b>${escapeHTML(risk.label.toUpperCase())}</b></p>
     </div>
@@ -831,64 +710,34 @@ function buildHtmlReport({
       <h2>${escapeHTML(tr('Чеклист допуска','Access checklist'))}</h2>
       <div class="kv">
         <div><b>Safari VT18</b></div>
-        <div>${OK(s.featuresOk)}
-          VT18=<span class="pill">${escapeHTML(s.features?.VT18 || '—')}</span>
-          18.4=<span class="pill">${escapeHTML(s.features?.v18_4 || '—')}</span>
-          <span class="pill">rule: 18.0-only</span>
+        <div>${OK(status.featuresOk)}
+          VT18=<span class="pill">${escapeHTML(status.features?.VT18 || '—')}</span>
+          18.4=<span class="pill">${escapeHTML(status.features?.v18_4 || '—')}</span>
         </div>
         <div><b>iOS ≥ 18</b></div>
-        <div>${OK(s.iosOk)}
-          <span class="${s.iosOk ? 'ok' : 'bad'}">
-            ${s.iosOk ? 'ok' : 'below'}
-          </span>
-          <span class="pill"><code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code></span>
+        <div>${OK(status.iosOk)}
+          <code>${escapeHTML(String(status.iosVersionDetected ?? 'n/a'))}</code>
         </div>
         <div><b>${escapeHTML(tr('Платформа','Platform'))}</b></div>
-        <div>${OK(s.platformOk)}
-          <span class="${s.platformOk ? 'ok' : 'bad'}">${
-            s.platformOk
-              ? (s.ipadDesktopOk
-                  ? tr('iPad (desktop-режим разрешён)','iPad (desktop-mode allowed)')
-                  : (s.macIntelOk
-                      ? tr('MacIntel (разрешён)','MacIntel (allowed)')
-                      : 'ok'))
-              : 'not iOS'
-          }</span>
-          <span class="pill"><code>${escapeHTML(String(platform || 'n/a'))}</code></span>
-        </div>
-        <div><b>Jailbreak</b></div>
-        <div>${OK(s.jbOk)}
-          <span class="${s.jbOk ? 'ok' : 'bad'}">${
-            s.jbOk
-              ? tr('нет джейлбрейка','no jailbreak')
-              : tr('обнаружены JB-признаки','jailbreak indicators found')
-          }</span>
-          <span class="pill"><code>${escapeHTML(s.jbLabel || 'n/a')}</code></span>
+        <div>${OK(status.platformOk)}
+          <code>${escapeHTML(String(platform || 'n/a'))}</code>
         </div>
         <div><b>DC/ISP</b></div>
-        <div>${OK(s.dcOk)}
-          <span class="${s.dcOk ? 'ok' : 'bad'}">${
-            s.dcOk
-              ? tr('домашний/мобильный','residential/mobile')
-              : tr('датацентр/хостинг','datacenter/hosting')
-          }</span>
-        </div>
+        <div>${OK(status.dcOk)}</div>
         <div><b>${escapeHTML(tr('Гео-разрешение','Geo permission'))}</b></div>
-        <div>${OK(s.geoOk)}</div>
+        <div>${OK(status.geoOk)}</div>
         <div><b>Camera</b></div>
-        <div>${OK(s.camOk)}</div>
+        <div>${OK(status.camOk)}</div>
         <div><b>Microphone</b></div>
-        <div>${OK(s.micOk)}</div>
+        <div>${OK(status.micOk)}</div>
         <div><b>${escapeHTML(tr('Итог допуска','Final decision'))}</b></div>
         <div>
-          <b>${finalCanLaunch
-            ? tr('МОЖНО ЗАПУСКАТЬ','ALLOW')
-            : tr('ЗАПРЕТ / РУЧНАЯ ПРОВЕРКА','DENY / MANUAL REVIEW')}</b>
+          <b>${canLaunch
+            ? escapeHTML(tr('МОЖНО ЗАПУСКАТЬ','ALLOW'))
+            : escapeHTML(tr('ЗАПРЕТ / РУЧНАЯ ПРОВЕРКА','DENY / MANUAL REVIEW'))}</b>
           ${
             strictTriggered
-              ? (strictFailed
-                  ? ' <span class="bad">(strict fail)</span>'
-                  : ' <span class="ok">(strict ok)</span>')
+              ? (strictFailed ? ' <span class="bad">(strict fail)</span>' : ' <span class="ok">(strict ok)</span>')
               : ''
           }
         </div>
@@ -910,53 +759,28 @@ function buildHtmlReport({
         <div><b>UA</b></div>
         <div><code>${escapeHTML(userAgent || '')}</code></div>
         <div><b>iOS / Platform</b></div>
-        <div><code>${escapeHTML(String(s.iosVersionDetected ?? ''))}</code> · <code>${escapeHTML(String(platform || ''))}</code></div>
-        <div><b>Safari VT18/18.4</b></div>
-        <div>VT18=<code>${escapeHTML(s.features?.VT18 || '—')}</code>, 18.4=<code>${escapeHTML(s.features?.v18_4 || '—')}</code></div>
-        <div><b>Jailbreak</b></div>
-        <div>${jbInfo}</div>
+        <div>
+          <code>${escapeHTML(String(status.iosVersionDetected ?? ''))}</code> ·
+          <code>${escapeHTML(String(platform || ''))}</code>
+        </div>
         <div><b>Geo</b></div>
         <div>${
           geo
-            ? `<a class="soft" href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17" target="_blank" rel="noreferrer">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> ±${escapeHTML(String(geo.acc))}m`
-            : tr('нет данных','no data')
+            ? `<a class="soft" href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> ±${escapeHTML(String(geo.acc))}m`
+            : escapeHTML(tr('нет данных','no data'))
         }</div>
       </div>
     </div>
   `;
-
-  const tableJb = jbRows.length ? `
-    <div class="card">
-      <h2>Jailbreak / Tools (active probes)</h2>
-      <table>
-        <thead><tr><th>scheme</th><th>opened</th><th>reason</th><th>ms</th></tr></thead>
-        <tbody>
-          ${jbRows.slice(0, 120).map(r => `
-            <tr>
-              <td><code>${escapeHTML(String(r.scheme || '').trim())}</code></td>
-              <td>${r.opened ? '<span class="ok">yes</span>' : 'no'}</td>
-              <td><code>${escapeHTML(r.reason || (r.opened ? 'signal' : 'timeout'))}</code></td>
-              <td>${r.durationMs != null ? escapeHTML(String(r.durationMs)) : '-'}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-      ${s?._jb?.rowsRaw && s._jb.rowsRaw.length !== jbRows.length
-        ? `<div class="muted">${escapeHTML(tr(
-            'Тестовые схемы (custom:/mytest:) скрыты из таблицы.',
-            'Test schemes (custom:/mytest:) are filtered out.'
-          ))}</div>` : ''}
-    </div>
-  ` : '';
 
   const jsonPretty = safeJson({
     code,
     geo,
     userAgent,
     platform,
-    iosVersionDetected: s.iosVersionDetected,
+    iosVersionDetected: status.iosVersionDetected,
     isSafari,
-    featuresSummary: s.features,
+    featuresSummary: status.features,
     client_profile: cp,
     device_check: dc,
     flags,
@@ -977,8 +801,8 @@ function buildHtmlReport({
   `;
 
   const footer = tr(
-    'Гейт на сервере: VT18 обязателен (18.4 не даёт пропуска). Hard-флаги дают авто-отказ; soft-флаги — для ручного контроля без авто-бана.',
-    'Server-side gate: VT18 is mandatory (18.4 does not grant access alone). Hard flags cause auto deny; soft flags are for manual review without auto-ban.'
+    'VT18 обязателен. Hard-флаги дают авто-отказ.',
+    'VT18 required. Hard flags auto-deny.'
   );
 
   const html = `
@@ -994,24 +818,12 @@ function buildHtmlReport({
       <div class="wrap">
         <div class="card">
           <h1>Device Check Report</h1>
-          <div class="summary">
-            ${escapeHTML(tr(
-              'Сверху — fingerprint и итог, ниже — причины, чеклист и технические детали.',
-              'Top: fingerprint and final decision; below: reasons, checklist, and technical details.'
-            ))}
-          </div>
-          <div class="summary">
-            <b>Fingerprint:</b> <code>${escapeHTML(fingerprint.short)}</code>
-            <span class="muted">(hash ${escapeHTML(fingerprint.hash.slice(0,16))}…)</span>
-          </div>
-          <div class="muted">
-            ${escapeHTML(tr('Сформировано','Generated'))}: ${new Date().toISOString()}
-          </div>
+          <div class="muted">${escapeHTML(tr('Сформировано','Generated'))}: ${new Date().toISOString()}</div>
+          <div><b>Fingerprint:</b> <code>${escapeHTML(fingerprint.short)}</code></div>
         </div>
         ${reasonsBlock}
         ${checklist}
         ${overview}
-        ${tableJb}
         ${raw}
         <div class="muted" style="margin-top:10px;">${escapeHTML(footer)}</div>
       </div>
@@ -1020,10 +832,12 @@ function buildHtmlReport({
   `;
   return html;
 }
+// === Part 3 — API, Report, Launch Decision, Start Server (NO-JB VERSION) ===
 
-// ==== health & debug ====
+// ==== health ====
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
+// ==== debug ====
 app.get('/api/debug/db', (_req, res) => {
   try {
     const size = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
@@ -1064,7 +878,7 @@ app.post('/api/register-code', requireAdminSecret, (req, res) => {
   }
 });
 
-// ==== Admin: register-codes (multi-chat) ====
+// ==== Admin: register-codes ====
 app.post('/api/register-codes', requireAdminSecret, (req, res) => {
   try {
     const { code, chatIds } = req.body || {};
@@ -1126,36 +940,40 @@ app.get('/api/client-ip', (req, res) => {
   res.json({ ip, country, isp, ua: req.headers['user-agent'] || null });
 });
 
-// ==== API: gate (frontend pre-check) ====
+// ==== API: gate (NO JB) ====
 app.post('/api/gate', (req, res) => {
   try {
     const {
       userAgent, platform, iosVersion,
-      client_profile, device_check, featuresSummary,
+      client_profile, device_check,
+      featuresSummary,
       strict
     } = req.body || {};
 
     const cp    = client_profile || {};
     const dc    = device_check   || {};
     const feats = normalizeFeatures_Strict18Only(featuresSummary);
-    const s     = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features: feats });
+
+    const status = deriveStatus({
+      iosVersion, platform, userAgent, cp, dc, features: feats
+    });
 
     let strictTriggered = !!(strict === true || strict === 1 || String(strict) === '1');
     let strictFailed = false;
-
     if (strictTriggered) {
       const sc = Number(dc?.score ?? NaN);
       if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
     }
 
-    const flags       = buildFlags(cp, dc, s, { userAgent, platform, features: feats });
-    const reasons     = buildReasons(flags);
-    const risk        = deriveScoreAndLabel(flags, reasons);
-    const canLaunch   = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
+    const flags    = buildFlags(cp, dc, status, { userAgent, platform, features: feats });
+    const reasons  = buildReasons(flags);
+    const risk     = deriveScoreAndLabel(flags, reasons);
+    const canLaunch = evaluateDecision({ status, flags, risk, strictTriggered, strictFailed });
+
     const fingerprint = buildFingerprint({
       userAgent,
       platform,
-      iosVersion: s.iosVersionDetected,
+      iosVersion: status.iosVersionDetected,
       cp,
       dc
     });
@@ -1169,22 +987,18 @@ app.post('/api/gate', (req, res) => {
         riskScore: risk.score
       },
       features: feats,
-      iosVersionDetected: s.iosVersionDetected,
-      platformOk: s.platformOk,
-      jbOk: s.jbOk,
-      jbLabel: s.jbLabel,
-      dcOk: s.dcOk,
+      iosVersionDetected: status.iosVersionDetected,
+      platformOk: status.platformOk,
+      dcOk: status.dcOk,
       flags,
-      fingerprint: {
-        short: fingerprint.short
-      }
+      fingerprint: { short: fingerprint.short }
     });
   } catch (e) {
     res.status(500).json({ ok:false, error: e.message || 'Internal error' });
   }
 });
 
-// ==== API: report ====
+// ==== API: report (NO JB) ====
 app.post('/api/report', async (req, res) => {
   try {
     const {
@@ -1196,35 +1010,36 @@ app.post('/api/report', async (req, res) => {
       strict
     } = req.body || {};
 
-    if (!code)        return res.status(400).json({ ok:false, error: 'No code' });
-    if (!photoBase64) return res.status(400).json({ ok:false, error: 'No photoBase64' });
+    if (!code)        return res.status(400).json({ ok:false, error:'No code' });
+    if (!photoBase64) return res.status(400).json({ ok:false, error:'No photoBase64' });
 
     const chatIds = getChatIdsForCode(String(code).toUpperCase());
-    if (!chatIds.length) {
-      return res.status(404).json({ ok:false, error:'Unknown code' });
-    }
+    if (!chatIds.length) return res.status(404).json({ ok:false, error:'Unknown code' });
 
     const cp    = client_profile || {};
     const dc    = device_check   || {};
     const feats = normalizeFeatures_Strict18Only(featuresSummary);
-    const s     = deriveStatus({ iosVersion, platform, userAgent, cp, dc, features: feats });
+
+    const status = deriveStatus({
+      iosVersion, platform, userAgent, cp, dc, features: feats
+    });
 
     let strictTriggered = !!(strict === true || strict === 1 || String(strict) === '1');
     let strictFailed = false;
-
     if (strictTriggered) {
       const sc = Number(dc?.score ?? NaN);
       if (!Number.isFinite(sc) || sc < 60) strictFailed = true;
     }
 
-    const flags       = buildFlags(cp, dc, s, { userAgent, platform, features: feats });
-    const reasons     = buildReasons(flags);
-    const risk        = deriveScoreAndLabel(flags, reasons);
-    const canLaunch   = evaluateDecision({ status: s, flags, risk, strictTriggered, strictFailed });
+    const flags     = buildFlags(cp, dc, status, { userAgent, platform, features: feats });
+    const reasons   = buildReasons(flags);
+    const risk      = deriveScoreAndLabel(flags, reasons);
+    const canLaunch = evaluateDecision({ status, flags, risk, strictTriggered, strictFailed });
+
     const fingerprint = buildFingerprint({
       userAgent,
       platform,
-      iosVersion: s.iosVersionDetected,
+      iosVersion: status.iosVersionDetected,
       cp,
       dc
     });
@@ -1233,12 +1048,9 @@ app.post('/api/report', async (req, res) => {
       ? reasons.map((r, i) =>
           `${i + 1}. [${escapeHTML(r.severity)}] ${escapeHTML(r.text)}`
         ).join('\n')
-      : escapeHTML(tr(
-          'Подозрительных сигналов нет. Среда выглядит честной.',
-          'No suspicious signals. Environment looks clean.'
-        ));
+      : escapeHTML(tr('Сигналов нет.','No signals.'));
 
-    const captionLines = [
+    const caption = [
       '<b>🕵️ DEVICE CHECK REPORT</b>',
       `${escapeHTML(tr('Статус','Status'))}: <b>${escapeHTML(risk.label.toUpperCase())}</b> (score: <b>${risk.score}</b>/100)`,
       `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
@@ -1248,90 +1060,59 @@ app.post('/api/report', async (req, res) => {
       reasonsLines,
       '',
       '--- Technical ---',
-      `${OK(s.iosOk)} iOS: <code>${escapeHTML(String(s.iosVersionDetected ?? 'n/a'))}</code>`,
-      `${OK(s.platformOk)} ${escapeHTML(tr('Платформа','Platform'))}: <code>${escapeHTML(String(platform || 'n/a'))}${s.ipadDesktopOk ? ' (iPad desktop-mode)' : (s.macIntelOk ? ' (MacIntel)' : '')}</code>`,
-      `${OK(s.jbOk)} ${s.jbOk
-        ? escapeHTML(tr('нет джейлбрейка','no jailbreak'))
-        : escapeHTML(tr('обнаружены JB-признаки','jailbreak indicators detected'))}`,
-      `${OK(s.dcOk)} DC/ISP: ${s.dcOk
-        ? escapeHTML(tr('нет','none'))
-        : '<b>DC/hosting</b>'}`,
-      `Safari: ${OK(s.featuresOk)} VT18=<code>${escapeHTML(feats.VT18)}</code>, 18.4=<code>${escapeHTML(feats.v18_4)}</code> (rule: 18.0-only)`,
+      `${OK(status.iosOk)} iOS: <code>${escapeHTML(String(status.iosVersionDetected ?? 'n/a'))}</code>`,
+      `${OK(status.platformOk)} ${escapeHTML(tr('Платформа','Platform'))}: <code>${escapeHTML(String(platform || 'n/a'))}</code>`,
+      `${OK(status.dcOk)} DC/ISP`,
+      `Safari: ${OK(status.featuresOk)} VT18=<code>${escapeHTML(feats.VT18)}</code> 18.4=<code>${escapeHTML(feats.v18_4)}</code>`,
       `Geo: ${
         geo
           ? `<a href="https://maps.google.com/?q=${encodeURIComponent(geo.lat)},${encodeURIComponent(geo.lon)}&z=17">${escapeHTML(`${geo.lat}, ${geo.lon}`)}</a> ±${escapeHTML(String(geo.acc))}m`
           : '<code>n/a</code>'
       }`,
       `UA: <code>${escapeHTML(userAgent || '')}</code>`,
-      `${escapeHTML(tr('Итог','Result'))}: <b>${canLaunch
-        ? escapeHTML(tr('МОЖНО ЗАПУСКАТЬ','ALLOW'))
-        : escapeHTML(tr('ЗАПРЕТ / РУЧНАЯ ПРОВЕРКА','DENY / MANUAL REVIEW'))}</b>` +
-        (strictTriggered
-          ? (strictFailed ? ' (strict fail)' : ' (strict ok)')
-          : ''),
+      `${escapeHTML(tr('Итог','Result'))}: <b>${
+        canLaunch ? escapeHTML(tr('МОЖНО ЗАПУСКАТЬ','ALLOW'))
+                  : escapeHTML(tr('ЗАПРЕТ / РУЧНАЯ ПРОВЕРКА','DENY / MANUAL REVIEW'))
+      }</b>` +
+      (strictTriggered
+        ? (strictFailed ? ' (strict fail)' : ' (strict ok)')
+        : ''),
       note ? `Note: <code>${escapeHTML(note)}</code>` : null
-    ].filter(Boolean);
+    ].filter(Boolean).join('\n');
 
-    const caption = captionLines.join('\n');
-    const buf     = b64ToBuffer(photoBase64);
-    const html    = buildHtmlReport({
+    const buf  = b64ToBuffer(photoBase64);
+    const html = buildHtmlReport({
       code, geo, userAgent, platform, iosVersion, isSafari,
       cp, dc, features: feats, strictTriggered, strictFailed
     });
-    const fname   = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
 
+    const filename = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
     const sent = [];
     const tasks = [];
 
     for (const id of chatIds) {
       const chat = String(id);
 
+      // photo
       tasks.push(
         sendPhotoToTelegram({
           chatId: chat,
           caption,
           photoBuf: buf
         })
-          .then(tgPhoto => {
-            sent.push({
-              chatId: chat,
-              ok: true,
-              message_id: tgPhoto?.result?.message_id,
-              type: 'photo'
-            });
-          })
-          .catch(e => {
-            sent.push({
-              chatId: chat,
-              ok: false,
-              error: String(e),
-              type: 'photo'
-            });
-          })
+          .then(r => sent.push({ chatId: chat, ok:true, type:'photo', message_id:r?.result?.message_id }))
+          .catch(e => sent.push({ chatId: chat, ok:false, type:'photo', error:String(e) }))
       );
 
+      // html
       tasks.push(
         sendDocumentToTelegram({
           chatId: chat,
           htmlString: html,
-          filename: fname
+          filename
         })
-          .then(tgDoc => {
-            sent.push({
-              chatId: chat,
-              ok: true,
-              message_id: tgDoc?.result?.message_id,
-              type: 'document'
-            });
-          })
-          .catch(e => {
-            sent.push({
-              chatId: chat,
-              ok: false,
-              error: String(e),
-              type: 'document'
-            });
-          })
+          .then(r => sent.push({ chatId: chat, ok:true, type:'document', message_id:r?.result?.message_id }))
+          .catch(e => sent.push({ chatId: chat, ok:false, type:'document', error:String(e) }))
       );
     }
 
@@ -1346,11 +1127,9 @@ app.post('/api/report', async (req, res) => {
         riskScore: risk.score
       },
       features: feats,
-      iosVersionDetected: s.iosVersionDetected,
-      platformOk: s.platformOk,
-      jbOk: s.jbOk,
-      jbLabel: s.jbLabel,
-      dcOk: s.dcOk,
+      iosVersionDetected: status.iosVersionDetected,
+      platformOk: status.platformOk,
+      dcOk: status.dcOk,
       flags,
       risk,
       fingerprint: {
@@ -1361,7 +1140,7 @@ app.post('/api/report', async (req, res) => {
     });
   } catch (e) {
     console.error('[report] error:', e);
-    res.status(500).json({ ok: false, error: e.message || 'Internal error' });
+    res.status(500).json({ ok:false, error: e.message || 'Internal error' });
   }
 });
 
@@ -1370,10 +1149,10 @@ app.use((req, res) => {
   if (req.method === 'GET' && req.accepts('html')) {
     return res.status(404).send('Not Found');
   }
-  res.status(404).json({ ok: false, error: 'Not Found' });
+  res.status(404).json({ ok:false, error:'Not Found' });
 });
 
-// ==== Start ====
+// ==== START ====
 app.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
   console.log(`[server] Public base: ${PUBLIC_BASE}`);

