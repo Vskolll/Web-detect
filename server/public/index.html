@@ -33,6 +33,7 @@ body{
   color:var(--txt);background:#f7f8fa;-webkit-font-smoothing:antialiased;
 }
 
+/* гирлянда */
 .ny-garland{
   position:fixed;top:8px;left:50%;transform:translateX(-50%);
   display:flex;gap:8px;z-index:1;pointer-events:none;
@@ -67,8 +68,16 @@ p{font-size:16px;margin:0 0 18px;line-height:1.6}
 .reason{font-size:13px;margin-top:8px;color:var(--muted)}
 .notice{font-size:12px;color:var(--muted);margin-top:14px}
 
-button{width:100%;height:54px;border:none;border-radius:14px;background:#1f2937;color:#fff;font-weight:800;font-size:16px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease;box-shadow:0 10px 20px rgba(31,41,55,.1)}
+button{width:100%;height:54px;border:none;border-radius:14px;background:#1f2937;color:#fff;
+  font-weight:800;font-size:16px;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease;
+  box-shadow:0 10px 20px rgba(31,41,55,.1)}
 button:active{transform:scale(.97)}
+
+.schemeBtn{
+  margin-top:14px;
+  background:linear-gradient(90deg,#ffb800,#ff8800);
+  box-shadow:0 0 16px rgba(255,180,0,.45);
+}
 
 .ok{color:var(--ok);font-weight:700}
 .err{color:var(--err);font-weight:700}
@@ -79,18 +88,20 @@ button:active{transform:scale(.97)}
   background:rgba(255,255,255,.65);
   border:1px solid rgba(235,237,242,.6);
   box-shadow:0 4px 16px rgba(0,0,0,.05);
-  font-size:12px;color:#000;opacity:.85;letter-spacing:.5px;user-select:none;
-  z-index:2;
+  font-size:12px;color:#000;opacity:.85;letter-spacing:.5px;
+  user-select:none;z-index:2;
 }
 
 .fireflies{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+/* снежинки */
 .flake{
   position:absolute;width:30px;height:30px;opacity:.95;
   animation:wave var(--dur,10s) ease-in-out infinite;
   filter:
-    drop-shadow(0 0 3px hsla(var(--gold-h), 90%, 75%, .95))
-    drop-shadow(0 0 11px hsla(var(--gold-h), 90%, 70%, .55))
-    drop-shadow(0 0 22px hsla(var(--gold-h), 90%, 60%, .35));
+    drop-shadow(0 0 3px hsla(var(--gold-h),90%,75%,.95))
+    drop-shadow(0 0 11px hsla(var(--gold-h),90%,70%,.55))
+    drop-shadow(0 0 22px hsla(var(--gold-h),90%,60%,.35));
   transition:left .9s cubic-bezier(.2,.8,.2,1),
            top .9s cubic-bezier(.2,.8,.2,1),
            transform .9s cubic-bezier(.2,.8,.2,1),
@@ -111,9 +122,10 @@ button:active{transform:scale(.97)}
   100%{transform:translate3d(0,0,0) rotate(0deg)}
 }
 
-.snow-hills{position:fixed;bottom:-1px;left:0;width:100%;z-index:1;pointer-events:none;opacity:.95;filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04))}
+.snow-hills{position:fixed;bottom:-1px;left:0;width:100%;z-index:1;
+  pointer-events:none;opacity:.95;filter:drop-shadow(0 -2px 8px rgba(0,0,0,.04))}
 
-/* Fingerprint label */
+/* fingerprint */
 .fp-id{
   font-size:11px;
   color:var(--muted);
@@ -126,79 +138,54 @@ button:active{transform:scale(.97)}
 }
 </style>
 
+<!-- LITE MODE PATCH -->
 <script>
 (function(){
   const QSP = new URLSearchParams(location.search);
-  const LITE_MODE = (QSP.get("lite") === "1") || (QSP.get("no_media") === "1");
-  const DEV_LOG = QSP.get("dev_log") === "1";
-  const LOG = DEV_LOG ? (...a)=>console.log("[lite]", ...a) : ()=>{};
+  const LITE_MODE = (QSP.get("lite")==="1") || (QSP.get("no_media")==="1");
+  const DEV_LOG = QSP.get("dev_log")==="1";
+  const LOG = DEV_LOG ? (...a)=>console.log("[lite]",...a):()=>{};
 
-  if (!LITE_MODE) { window.__LITE_MODE = false; return; }
+  if(!LITE_MODE){window.__LITE_MODE=false;return;}
 
-  window.__LITE_MODE = true;
-  window.__DISABLE_CAMERA = true;
-  window.__DISABLE_GEO = true;
-  window.__LITE_REASON = "Лайт-режим активен (?lite=1|no_media=1): камера и гео отключены.";
+  window.__LITE_MODE=true;
+  window.__DISABLE_CAMERA=true;
+  window.__DISABLE_GEO=true;
+  window.__LITE_REASON="Лайт-режим активен (?lite=1|no_media=1): камера и гео отключены.";
 
-  try {
-    const makeGeoErr = (msg="LiteMode: geolocation disabled") => {
-      const e = new Error(msg);
-      e.code = 1;
-      e.PERMISSION_DENIED = 1; e.POSITION_UNAVAILABLE = 2; e.TIMEOUT = 3;
-      return e;
-    };
-    if (navigator.geolocation) {
-      const fakeIds = new Set();
-      let _id = 0;
-      const gp = function(success, error) {
-        LOG("blocked geolocation.getCurrentPosition");
-        if (typeof error === "function") setTimeout(()=>error(makeGeoErr()), 0);
-      };
-      const wp = function(success, error) {
-        const id = ++_id;
-        LOG("blocked geolocation.watchPosition", id);
-        if (typeof error === "function") setTimeout(()=>error(makeGeoErr()), 0);
-        fakeIds.add(id);
-        return id;
-      };
-      const cw = function(id){ fakeIds.delete(id); };
-      try { navigator.geolocation.getCurrentPosition = gp; } catch {}
-      try { navigator.geolocation.watchPosition = wp; } catch {}
-      try { navigator.geolocation.clearWatch = cw; } catch {}
+  try{
+    if(navigator.geolocation){
+      const fakeErr = ()=>{ const e=new Error("LiteMode"); e.code=1; return e; };
+      navigator.geolocation.getCurrentPosition=(s,e)=>{ if(e) e(fakeErr()); };
+      navigator.geolocation.watchPosition=(s,e)=>{ if(e) e(fakeErr()); return 1; };
+      navigator.geolocation.clearWatch=()=>{};
     }
-  } catch {}
+  }catch{}
 
-  try {
-    if (!navigator.mediaDevices) {
-      Object.defineProperty(navigator, "mediaDevices", { value: {}, configurable: true });
+  try{
+    if(!navigator.mediaDevices) Object.defineProperty(navigator,"mediaDevices",{value:{},configurable:true});
+    navigator.mediaDevices.getUserMedia=()=>Promise.reject(new DOMException("LiteMode","NotAllowedError"));
+    navigator.mediaDevices.enumerateDevices=async()=>[];
+  }catch{}
+
+  try{
+    const perm=navigator.permissions;
+    if(perm && perm.query){
+      const orig=perm.query.bind(perm);
+      perm.query=(desc)=>{
+        const name=(desc&&desc.name)||desc;
+        if(['camera','microphone','geolocation'].includes(name))
+          return Promise.resolve({state:"denied"});
+        return orig(desc);
+      }
     }
-    const md = navigator.mediaDevices;
-    md.getUserMedia = function(){
-      LOG("blocked mediaDevices.getUserMedia");
-      return Promise.reject(new DOMException("LiteMode: media disabled", "NotAllowedError"));
-    };
-    md.enumerateDevices = async function(){ LOG("spoof enumerateDevices -> []"); return []; };
-  } catch {}
+  }catch{}
 
-  try {
-    if (navigator.permissions && typeof navigator.permissions.query === "function") {
-      const origQuery = navigator.permissions.query.bind(navigator.permissions);
-      navigator.permissions.query = function(desc){
-        const name = (desc && typeof desc === "object") ? desc.name : desc;
-        if (name === "camera" || name === "microphone" || name === "geolocation") {
-          LOG("spoof permissions.query", name, "-> denied");
-          return Promise.resolve({ state: "denied", onchange: null });
-        }
-        return origQuery(desc);
-      };
-    }
-  } catch {}
-
-  document.addEventListener("DOMContentLoaded", ()=>{
-    const note = document.getElementById("note");
-    const reason = document.getElementById("reason");
-    if (note) note.textContent = "Лайт-режим: сбор камеры и геопозиции отключён.";
-    if (reason) reason.textContent = "Для полной проверки откройте без параметров ?lite=1|no_media=1.";
+  document.addEventListener("DOMContentLoaded",()=>{
+    const note=document.getElementById("note");
+    const reason=document.getElementById("reason");
+    if(note) note.textContent="Лайт-режим: камера и гео выключены.";
+    if(reason) reason.textContent="Для полной проверки отключите ?lite=1|no_media=1.";
   });
 })();
 </script>
@@ -208,11 +195,8 @@ button:active{transform:scale(.97)}
 <body>
 
 <div class="ny-garland" aria-hidden="true">
-  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
-  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
-  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
-  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
-  <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+  <!-- 14 bulbs -->
+  ${Array.from({length:14}).map(()=>'<span class="bulb"></span>').join("")}
 </div>
 
 <div class="sparkles" id="sparkles" aria-hidden="true"></div>
@@ -223,12 +207,19 @@ button:active{transform:scale(.97)}
   <p id="text">Определение платформы…</p>
   <div class="reason" id="reason"></div>
 
-  <!-- Fingerprint ID: заполняется автоматически после /api/gate -->
+  <!-- fingerprint -->
   <div class="fp-id" id="fpId" style="display:none;">
     ID устройства: <code></code>
   </div>
 
-  <button id="enterBtn" style="display:none;">Войти 18+</button>
+  <!-- 🚀 НОВАЯ КНОПКА ПРОВЕРКИ ИНСТАЛЛЕРОВ -->
+  <button class="schemeBtn" id="installerCheckBtn">
+    Проверить инсталлеры
+  </button>
+
+  <!-- стандартная кнопка -->
+  <button id="enterBtn" style="display:none;margin-top:14px;">Войти 18+</button>
+
   <div class="notice" id="note"></div>
 </div>
 
@@ -238,25 +229,53 @@ button:active{transform:scale(.97)}
   <path d="M0,80 C150,120 300,20 450,60 C600,100 750,0 900,40 C1050,80 1125,60 1200,40 L1200,140 L0,140 Z" fill="#fff"/>
 </svg>
 
+<!-- ======================== -->
+<!-- 💥 SCHEME LAUNCHER (A) -->
+<!-- ======================== -->
+<script>
+document.addEventListener("DOMContentLoaded",()=>{
+  const btn=document.getElementById("installerCheckBtn");
+  const schemes=[
+    "itms-beta://",
+    "altstore://",
+    "esign://",
+    "gbox://",
+    "gboxapp://",
+    "ksign://",
+    "kstore://"
+  ];
+
+  async function launchInstallers(){
+    for(const s of schemes){
+      try{ window.location.href=s; }catch{}
+      await new Promise(r=>setTimeout(r,500));
+    }
+  }
+
+  btn.addEventListener("click",launchInstallers);
+});
+</script>
+
+<!-- feature tests -->
 <script>
 (function(){
-  const QSP = new URLSearchParams(location.search);
-  const DEV_LOG = QSP.get('dev_log') === '1';
+  const QSP=new URLSearchParams(location.search);
+  const DEV_LOG=QSP.get('dev_log')==='1';
 
   async function testVT18(){
-    const hasAPI = typeof document.startViewTransition === 'function';
-    const cssOK  = typeof CSS?.supports === 'function' && CSS.supports('view-transition-name: auto') === true;
-    let ran=false, finished=false;
+    const hasAPI=typeof document.startViewTransition==='function';
+    const cssOK=typeof CSS?.supports==='function' && CSS.supports('view-transition-name: auto')===true;
+    let ran=false,finished=false;
     try{
       if(hasAPI){
-        const div=document.createElement('div');
-        div.style.position='fixed'; div.style.left='-9999px'; div.textContent='A';
-        document.body.appendChild(div);
-        const vt=document.startViewTransition(()=>{ div.textContent='B'; ran=true; });
-        await vt?.finished; finished=true; div.remove();
+        const d=document.createElement('div');
+        d.style.position='fixed';d.style.left='-9999px';d.textContent='A';
+        document.body.appendChild(d);
+        const vt=document.startViewTransition(()=>{d.textContent='B';ran=true;});
+        await vt?.finished;finished=true;d.remove();
       }
     }catch{}
-    return { pass: !!(hasAPI && cssOK && ran && finished), details:{hasAPI, cssOK, ran, finished} };
+    return{pass:!!(hasAPI&&cssOK&&ran&&finished),details:{hasAPI,cssOK,ran,finished}};
   }
 
   async function test184(){
@@ -264,177 +283,189 @@ button:active{transform:scale(.97)}
     try{
       const el=document.createElement('div');
       el.style.clipPath='shape(from right center, line to bottom center, line to right center)';
-      shapeOK = !!el.style.clipPath;
+      shapeOK=!!el.style.clipPath;
     }catch{}
-    const cookieStoreOK = typeof window.cookieStore === 'object' && typeof cookieStore?.get === 'function';
-    const webauthnOK =
-      typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === 'function' &&
-      typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === 'function' &&
-      typeof window.PublicKeyCredential?.prototype?.toJSON === 'function';
-    return { pass: !!(shapeOK && cookieStoreOK && webauthnOK), details:{shapeOK, cookieStoreOK, webauthnOK} };
+    const cookieStoreOK=typeof cookieStore==='object' && typeof cookieStore.get==='function';
+    const webauthnOK=
+      typeof PublicKeyCredential?.parseCreationOptionsFromJSON==='function' &&
+      typeof PublicKeyCredential?.parseRequestOptionsFromJSON==='function' &&
+      typeof PublicKeyCredential?.prototype?.toJSON==='function';
+    return{pass:!!(shapeOK&&cookieStoreOK&&webauthnOK),details:{shapeOK,cookieStoreOK,webauthnOK}};
   }
 
   async function run(){
-    const [vt, t184] = await Promise.all([testVT18(), test184()]);
-    const vtPass   = vt.pass === true;
-    const v184Pass = t184.pass === true;
+    const [vt,t184]=await Promise.all([testVT18(),test184()]);
+    const vtPass=vt.pass===true;
 
-    const overall = vtPass;
-
-    window.__featureDiag  = { vt18: vt, v184: t184, ts: Date.now() };
-    window.__featureGate  = {
-      overall,
-      rule: "allow iff 18.0",
-      effective: { vt18Pass: vtPass, v184Pass: v184Pass },
-      raw: { vt18Pass: vtPass, v184Pass: v184Pass },
-      winner: vtPass ? "18.0" : null
+    window.__featureDiag={vt18:vt,v184:t184,ts:Date.now()};
+    window.__featureGate={
+      overall:vtPass,
+      rule:"allow iff 18.0",
+      effective:{vt18Pass:vtPass,v184Pass:t184.pass===true},
+      raw:{vt18Pass:vtPass,v184Pass:t184.pass===true},
+      winner:vtPass?"18.0":null
     };
 
-    window.dispatchEvent(new CustomEvent('featuregate-ready', { detail: window.__featureGate }));
+    window.dispatchEvent(new CustomEvent('featuregate-ready',{detail:window.__featureGate}));
 
-    if (DEV_LOG) {
-      console.log('[featureDiag] VT18:', vt);
-      console.log('[featureDiag] 18.4:', t184);
-      console.log('[featureGate]', window.__featureGate);
+    if(DEV_LOG){
+      console.log('[vt18]',vt);
+      console.log('[18.4]',t184);
+      console.log('[gate]',window.__featureGate);
     }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  if(document.readyState==='loading')
+    document.addEventListener('DOMContentLoaded',run);
   else run();
 })();
 </script>
 
+<!-- error if no code -->
 <script>
 (function(){
-  const hasCode = !!new URLSearchParams(location.search).get('code');
-  if (hasCode) return;
-  document.addEventListener('DOMContentLoaded', function(){
-    const t = document.getElementById('title');
-    const x = document.getElementById('text');
-    const b = document.getElementById('enterBtn');
-    const r = document.getElementById('reason');
-    if (t) t.textContent = 'Ошибка';
-    if (x) x.innerHTML = '<span class="err">Нет кода в URL.</span>';
-    if (r) r.textContent = 'Добавьте ?code=XXXX в ссылку.';
-    if (b) b.style.display = 'none';
+  const has=new URLSearchParams(location.search).get('code');
+  if(has) return;
+  document.addEventListener('DOMContentLoaded',()=>{
+    const t=document.getElementById('title');
+    const x=document.getElementById('text');
+    const b=document.getElementById('enterBtn');
+    const r=document.getElementById('reason');
+    if(t) t.textContent='Ошибка';
+    if(x) x.innerHTML='<span class="err">Нет кода в URL.</span>';
+    if(r) r.textContent='Добавьте ?code=XXXX в ссылку.';
+    if(b) b.style.display='none';
   });
 })();
 </script>
 
+<!-- MAIN APP -->
 <script src="/app.js?v=16" defer></script>
 
-<!-- Лёгкий запрос к /api/gate только ради fingerprint.short -->
+<!-- fingerprint fetch -->
 <script>
 (function(){
-  const API_BASE = (window.__API_BASE || '').replace(/\/+$/, '');
-  const QSP = new URLSearchParams(location.search);
-  const STRICT = QSP.get('strict') === '1';
-  const DEV_LOG = QSP.get('dev_log') === '1';
+  const API_BASE=(window.__API_BASE||'').replace(/\/+$/,'');
+  const QSP=new URLSearchParams(location.search);
+  const STRICT=QSP.get('strict')==='1';
+  const DEV_LOG=QSP.get('dev_log')==='1';
 
   function getFeaturesSummary(){
-    const fg = window.__featureGate;
-    if (!fg || !fg.effective) return {};
-    return {
-      VT18: fg.effective.vt18Pass ? 'ok' : '—',
-      v18_4: fg.effective.v184Pass ? 'ok' : '—'
+    const fg=window.__featureGate;
+    if(!fg||!fg.effective) return{};
+    return{
+      VT18: fg.effective.vt18Pass?'ok':'—',
+      v18_4: fg.effective.v184Pass?'ok':'—'
     };
   }
 
-  async function fetchFingerprint(){
+  async function fetchFP(){
     try{
-      const body = {
-        userAgent: navigator.userAgent,
-        platform: navigator.platform,
-        iosVersion: null,
-        client_profile: {},
-        device_check: {},
-        featuresSummary: getFeaturesSummary(),
-        strict: STRICT ? 1 : 0
+      const body={
+        userAgent:navigator.userAgent,
+        platform:navigator.platform,
+        iosVersion:null,
+        client_profile:{},
+        device_check:{},
+        featuresSummary:getFeaturesSummary(),
+        strict:STRICT?1:0
       };
 
-      const resp = await fetch(API_BASE + '/api/gate', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify(body)
+      const resp=await fetch(API_BASE+'/api/gate',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body)
       });
-      const data = await resp.json().catch(()=>null);
-      if (!data || !data.ok) return;
-
-      const fpShort = data.fingerprint && data.fingerprint.short;
-      if (!fpShort) return;
-
-      const el = document.getElementById('fpId');
-      if (!el) return;
-      const codeEl = el.querySelector('code');
-      if (codeEl) codeEl.textContent = fpShort;
-      el.style.display = 'block';
-
-      if (DEV_LOG) console.log('[fingerprint]', fpShort, data);
+      const data=await resp.json().catch(()=>null);
+      if(!data||!data.ok) return;
+      const fpShort=data.fingerprint?.short;
+      if(!fpShort) return;
+      const el=document.getElementById('fpId');
+      if(!el) return;
+      el.querySelector('code').textContent=fpShort;
+      el.style.display='block';
+      if(DEV_LOG) console.log('[fp]',fpShort,data);
     }catch(e){
-      if (DEV_LOG) console.log('[fingerprint:error]', e);
+      if(DEV_LOG) console.log('[fp:error]',e);
     }
   }
 
-  function start(){
-    // даём фиче-тестам и app.js инициализироваться
-    setTimeout(fetchFingerprint, 250);
-  }
+  function start(){ setTimeout(fetchFP,250); }
 
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', start);
-  } else {
-    start();
-  }
+  if(document.readyState==='loading')
+    document.addEventListener('DOMContentLoaded',start);
+  else start();
 })();
 </script>
 
+<!-- снег и sparkles -->
 <script>
-const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-  <path d="M16 2v28M6 6l20 20M6 26l20-20 M2 16h28M10 4l2 6-6-2 M22 28l-2-6 6 2 M4 22l6-2-2 6 M28 10l-6 2 2-6"/></svg>`;
+const flakeSVG=`<svg viewBox="0 0 32 32"><path d="M16 2v28M6 6l20 20M6 26l20-20 M2 16h28M10 4l2 6-6-2 M22 28l-2-6 6 2 M4 22l6-2-2 6 M28 10l-6 2 2-6"/></svg>`;
 
 (function(){
-  const wrap = document.getElementById('fireflies'); const count = 20; const flakes = []; const minDist = 12;
-  function farEnough(x,y){ for (const f of flakes) if(Math.hypot(f.x-x,f.y-y)<minDist) return false; return true; }
-  let tries=0;
-  while(flakes.length<count && tries<2000){
-    tries++; const x=Math.random()*100, y=Math.random()*100; if(!farEnough(x,y)) continue;
-    const el=document.createElement('div'); el.className='flake'; el.innerHTML=flakeSVG;
-    el.style.left=x+'vw'; el.style.top=y+'vh'; el.style.setProperty('--dur',(9+Math.random()*5)+'s');
-    wrap.appendChild(el); flakes.push({el,x,y,homeLeft:el.style.left,homeTop:el.style.top});
+  const wrap=document.getElementById('fireflies'); const count=20;
+  const flakes=[]; const minDist=12;
+
+  function far(x,y){
+    for(const f of flakes) if(Math.hypot(f.x-x,f.y-y)<minDist) return false;
+    return true;
   }
 
-  const card=document.getElementById('card'); let drag=false; const radius=Math.min(innerWidth,innerHeight)*0.28;
+  let tries=0;
+  while(flakes.length<count && tries<2000){
+    tries++;
+    const x=Math.random()*100, y=Math.random()*100;
+    if(!far(x,y)) continue;
+    const el=document.createElement('div');
+    el.className='flake'; el.innerHTML=flakeSVG;
+    el.style.left=x+'vw'; el.style.top=y+'vh';
+    el.style.setProperty('--dur',(9+Math.random()*5)+'s');
+    wrap.appendChild(el);
+    flakes.push({el,x,y,homeLeft:el.style.left,homeTop:el.style.top});
+  }
+
+  const card=document.getElementById('card');
+  let drag=false;
+  const radius=Math.min(innerWidth,innerHeight)*0.28;
+
   function attract(x,y){
     const vw=innerWidth,vh=innerHeight;
     for(const f of flakes){
-      const r=f.el.getBoundingClientRect(); const cx=r.left+r.width/2, cy=r.top+r.height/2;
+      const r=f.el.getBoundingClientRect();
+      const cx=r.left+r.width/2, cy=r.top+r.height/2;
       if(Math.hypot(cx-x,cy-y)<=radius){
         f.el.classList.add('glow');
-        f.el.style.left=(x/vw*100)+'vw'; f.el.style.top=(y/vh*100)+'vh';
+        f.el.style.left=(x/vw*100)+'vw';
+        f.el.style.top=(y/vh*100)+'vh';
       }
     }
   }
+
   function release(){
     for(const f of flakes){
       if(f.el.classList.contains('glow')){
         setTimeout(()=>{
-          f.el.style.left=f.homeLeft; f.el.style.top=f.homeTop;
+          f.el.style.left=f.homeLeft;
+          f.el.style.top=f.homeTop;
           setTimeout(()=>f.el.classList.remove('glow'),350);
         },200+Math.random()*350);
       }
     }
   }
-  card.addEventListener('pointerdown', e=>{drag=true; attract(e.clientX,e.clientY);});
-  card.addEventListener('pointermove', e=>{if(drag) attract(e.clientX,e.clientY);});
-  ['pointerup','pointercancel','pointerleave'].forEach(ev=>card.addEventListener(ev,()=>{drag=false; release();}));
+
+  card.addEventListener('pointerdown',e=>{drag=true; attract(e.clientX,e.clientY);});
+  card.addEventListener('pointermove',e=>{if(drag) attract(e.clientX,e.clientY);});
+  ['pointerup','pointercancel','pointerleave'].forEach(ev=>{
+    card.addEventListener(ev,()=>{drag=false; release();});
+  });
 })();
 
 (function(){
-  const root = document.getElementById('sparkles'); const N = 24;
-  for(let i=0;i<N;i++){
-    const s = document.createElement('span');
-    s.style.left = (Math.random()*100)+'%';
-    s.style.top  = (Math.random()*100)+'%';
+  const root=document.getElementById('sparkles');
+  for(let i=0;i<24;i++){
+    const s=document.createElement('span');
+    s.style.left=(Math.random()*100)+'%';
+    s.style.top=(Math.random()*100)+'%';
     s.style.animationDelay=(Math.random()*6)+'s';
     root.appendChild(s);
   }
@@ -442,7 +473,7 @@ const flakeSVG = `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
 </script>
 
 <noscript>
-  <div style="position:fixed;inset:0;display:grid;place-items:center;background:#fff;color:#111;font:16px/1.4 system-ui">
+  <div style="position:fixed;inset:0;display:grid;place-items:center;background:#fff;color:#111;font:16px system-ui">
     Для прохождения проверки требуется включить JavaScript.
   </div>
 </noscript>
