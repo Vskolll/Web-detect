@@ -10,20 +10,20 @@
 </script>
 
 <style>
-/* =============== BASE =============== */
+/* ===== BASE ===== */
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
   width: 100%;
   overflow: hidden;
-  font-family: system-ui, sans-serif;
   display: flex;
   justify-content: center;
   align-items: center;
+  font-family: system-ui, sans-serif;
 }
 
-/* ---- ВИДЕО ФОН ---- */
+/* ===== BACKGROUND VIDEO ===== */
 .video-bg {
   position: fixed;
   top: 0; left: 0;
@@ -41,21 +41,19 @@ html, body {
   z-index: -1;
 }
 
-/* =============== CARD =============== */
+/* ===== CARD (GLASS) ===== */
 .card {
-  width: 90%;
+  width: 92%;
   max-width: 420px;
-
   padding: 26px 22px;
 
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255,255,255,0.55);
   backdrop-filter: blur(18px);
 
   border-radius: 20px;
-  box-shadow: 0 0 38px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 38px rgba(0,0,0,0.35);
 
   text-align: center;
-
   animation: fadeIn 0.5s ease;
 }
 
@@ -64,7 +62,7 @@ html, body {
   to   { opacity:1; transform: translateY(0); }
 }
 
-/* =============== BUTTONS =============== */
+/* ===== BUTTONS ===== */
 button {
   width: 100%;
   padding: 14px;
@@ -72,30 +70,27 @@ button {
 
   background: linear-gradient(90deg, #111, #000);
   color: white;
-
   font-size: 16px;
   font-weight: 600;
 
   border: none;
   border-radius: 12px;
-
   cursor: pointer;
   transition: 0.25s;
-}
-
-button:disabled {
-  opacity: 0.55;
-  filter: grayscale(55%);
-  cursor: not-allowed;
 }
 
 button:hover:not(:disabled) {
   filter: brightness(1.2);
 }
 
+button:disabled {
+  opacity: .55;
+  filter: grayscale(.6);
+  cursor: not-allowed;
+}
+
 #enterBtn { display: none; }
 
-/* =============== EXTRA =============== */
 .reason {
   font-size: 13px;
   margin-top: 4px;
@@ -107,17 +102,17 @@ button:hover:not(:disabled) {
   margin-top: 8px;
 }
 </style>
-
 </head>
+
 <body>
 
-<!-- === ВИДЕО ФОН === -->
+<!-- VIDEO -->
 <video class="video-bg" autoplay muted loop playsinline>
   <source src="/21121.mp4" type="video/mp4">
 </video>
 <div class="video-overlay"></div>
 
-<!-- === ЦЕНТРАЛЬНАЯ КАРТОЧКА === -->
+<!-- CARD -->
 <div class="card">
 
   <h2 id="title">Проверка устройства</h2>
@@ -125,21 +120,16 @@ button:hover:not(:disabled) {
 
   <div class="reason" id="reason"></div>
 
-  <div id="fpId">
-    ID устройства: <code></code>
-  </div>
+  <div id="fpId">ID устройства: <code></code></div>
 
   <button id="installerCheckBtn">Проверить инсталлеры</button>
-
   <button id="startFlowBtn">Начать проверку устройства</button>
-
   <button id="enterBtn">Войти 18+</button>
 
-  <p id="note" style="font-size:12px;color:#222;margin-top:12px;"></p>
-
+  <p id="note" style="font-size:12px;color:#111;margin-top:12px;"></p>
 </div>
 
-<!-- === Проверка инсталлеров === -->
+<!-- INSTALLER CHECK -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("installerCheckBtn");
@@ -162,19 +152,18 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
-<!-- === ЛОГИКА FLOW === -->
+<!-- MAIN FLOW LOGIC -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
+
   const startBtn = document.getElementById("startFlowBtn");
   const text = document.getElementById("text");
   const reason = document.getElementById("reason");
   const enter = document.getElementById("enterBtn");
 
-  enter.style.display = "none";
-
   startBtn.addEventListener("click", async () => {
+
     startBtn.disabled = true;
-    startBtn.textContent = "Проверка…";
     text.textContent = "Идёт проверка устройства...";
     reason.textContent = "";
 
@@ -182,25 +171,32 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await window.startAutoFlow();
 
       const canLaunch = res?.decision?.canLaunch === true;
-      const failReason =
-        res?.risk?.reasons?.[0] ||
-        res?.decision?.reason ||
-        "Сервер отклонил доступ.";
+
+      // ==== ОШИБКА БЫЛА ЗДЕСЬ — теперь фиксировано ====
 
       if (canLaunch) {
-        text.textContent = "Проверка пройдена";
+        text.textContent = "Проверка пройдена ✓";
         enter.style.display = "block";
         enter.disabled = false;
         startBtn.style.display = "none";
-      } else {
-        text.textContent = "Доступ запрещён";
-        reason.textContent = failReason;
-        startBtn.disabled = false;
-        startBtn.textContent = "Начать проверку устройства";
+        return;
       }
 
+      // если запрещено — выводим причину
+      const failReason =
+        res?.risk?.reasons?.[0]?.text ||
+        res?.decision?.reason ||
+        "Сервер отклонил доступ.";
+
+      text.textContent = "Доступ запрещён";
+      reason.textContent = failReason;
+
+      startBtn.disabled = false;
+      startBtn.textContent = "Начать проверку устройства";
+
     } catch (e) {
-      reason.textContent = "Ошибка";
+      text.textContent = "Ошибка";
+      reason.textContent = e.message || "Неизвестная ошибка";
       startBtn.disabled = false;
       startBtn.textContent = "Начать проверку устройства";
     }
@@ -208,52 +204,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
-<!-- === FeatureGate === -->
-<script>
-(function() {
-  async function testVT18() {
-    const hasAPI = typeof document.startViewTransition === "function";
-    const cssOK = typeof CSS?.supports === "function" && CSS.supports("view-transition-name: auto");
-    let ran = false, finished = false;
-
-    try {
-      if (hasAPI) {
-        const el = document.createElement("div");
-        document.body.appendChild(el);
-        const vt = document.startViewTransition(() => { ran = true; });
-        await vt?.finished;
-        finished = true;
-        el.remove();
-      }
-    } catch {}
-
-    return { pass: !!(hasAPI && cssOK && ran && finished) };
-  }
-
-  async function test184() {
-    let shapeOK = false;
-    try {
-      const el = document.createElement("div");
-      el.style.clipPath = "shape(from left, line to bottom)";
-      shapeOK = !!el.style.clipPath;
-    } catch {}
-    const cookieOK = typeof cookieStore === "object";
-    return { pass: !!(shapeOK && cookieOK) };
-  }
-
-  async function run() {
-    const [vt, v184] = await Promise.all([testVT18(), test184()]);
-    window.__featureGate = {
-      overall: vt.pass,
-      effective: { vt18Pass: vt.pass, v184Pass: v184.pass }
-    };
-  }
-
-  document.addEventListener("DOMContentLoaded", run);
-})();
-</script>
-
-<!-- === Fingerprint Loader === -->
+<!-- FINGERPRINT -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const API = window.__API_BASE;
@@ -274,7 +225,8 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
-<script src="/app.js?v=21" defer></script>
+<!-- MAIN APP.JS -->
+<script src="/app.js?v=999" defer></script>
 
 </body>
 </html>
