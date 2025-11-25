@@ -10,22 +10,23 @@
 </script>
 
 <style>
-/* ---- GLOBAL ---- */
-body, html {
-  padding: 0;
+/* =============== BASE =============== */
+html, body {
   margin: 0;
+  padding: 0;
   height: 100%;
   width: 100%;
   overflow: hidden;
-  font-family: system-ui, -apple-system, sans-serif;
-  background: #000;
+  font-family: system-ui, sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
-/* ---- VIDEO BG ---- */
+/* ---- ВИДЕО ФОН ---- */
 .video-bg {
   position: fixed;
-  top: 0;
-  left: 0;
+  top: 0; left: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -34,113 +35,91 @@ body, html {
 
 .video-overlay {
   position: fixed;
-  top:0;left:0;
-  width:100%;height:100%;
-  background: rgba(0,0,0,0.35);
-  z-index:-1;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.45);
+  z-index: -1;
 }
 
-/* ---- CENTRAL CARD ---- */
+/* =============== CARD =============== */
 .card {
-  position: absolute;
-  top: 8%;
-  left: 50%;
-  transform: translateX(-50%);
   width: 90%;
   max-width: 420px;
 
-  padding: 24px;
+  padding: 26px 22px;
+
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(18px);
+
+  border-radius: 20px;
+  box-shadow: 0 0 38px rgba(0, 0, 0, 0.35);
+
   text-align: center;
 
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-
-  border: 1px solid rgba(255,255,255,0.2);
-  border-radius: 18px;
-  box-shadow: 0 0 24px rgba(0,0,0,0.25);
+  animation: fadeIn 0.5s ease;
 }
 
-.card h2 {
-  color: #fff;
-  margin-bottom: 10px;
+@keyframes fadeIn {
+  from { opacity:0; transform: translateY(12px); }
+  to   { opacity:1; transform: translateY(0); }
 }
 
-.card p, .reason, #fpId code {
-  color: #eee;
-}
-
-/* ---- BOTTOM BUTTON PANEL ---- */
-.bottom-panel {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 92%;
-  max-width: 430px;
-
-  padding: 16px;
-  background: rgba(255,255,255,0.18);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.25);
-}
-
+/* =============== BUTTONS =============== */
 button {
   width: 100%;
   padding: 14px;
-  margin-top: 10px;
+  margin-top: 14px;
+
+  background: linear-gradient(90deg, #111, #000);
+  color: white;
+
   font-size: 16px;
   font-weight: 600;
-  border-radius: 12px;
-  border: none;
-  cursor: pointer;
 
-  background: rgba(0,0,0,0.65);
-  color: #fff;
-  backdrop-filter: blur(4px);
+  border: none;
+  border-radius: 12px;
+
+  cursor: pointer;
+  transition: 0.25s;
 }
 
-/* Hidden Enter */
+button:disabled {
+  opacity: 0.55;
+  filter: grayscale(55%);
+  cursor: not-allowed;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+
 #enterBtn { display: none; }
 
-/* Device ID */
+/* =============== EXTRA =============== */
+.reason {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
 #fpId {
   display: none;
   font-size: 12px;
   margin-top: 8px;
-}
-
-/* Footer */
-.footer {
-  position: absolute;
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: #bbb;
-  font-size: 12px;
-  text-align: center;
-  width: 100%;
-}
-.footer a {
-  color: #fff;
-  text-decoration: none;
-  font-weight: 600;
 }
 </style>
 
 </head>
 <body>
 
-<!-- === VIDEO BG === -->
+<!-- === ВИДЕО ФОН === -->
 <video class="video-bg" autoplay muted loop playsinline>
   <source src="/21121.mp4" type="video/mp4">
 </video>
 <div class="video-overlay"></div>
 
-<!-- === MAIN CARD === -->
+<!-- === ЦЕНТРАЛЬНАЯ КАРТОЧКА === -->
 <div class="card">
+
   <h2 id="title">Проверка устройства</h2>
   <p id="text">Ожидание начала проверки…</p>
 
@@ -149,25 +128,18 @@ button {
   <div id="fpId">
     ID устройства: <code></code>
   </div>
-</div>
 
-<!-- === BOTTOM BUTTON PANEL === -->
-<div class="bottom-panel">
   <button id="installerCheckBtn">Проверить инсталлеры</button>
+
   <button id="startFlowBtn">Начать проверку устройства</button>
+
   <button id="enterBtn">Войти 18+</button>
+
+  <p id="note" style="font-size:12px;color:#222;margin-top:12px;"></p>
+
 </div>
 
-<!-- Footer -->
-<div class="footer">
-  Создатель: <a href="https://t.me/v7ck9ll" target="_blank">@v7ck9ll</a>
-</div>
-
-
-
-
-
-<!-- === CHECK INSTALLERS === -->
+<!-- === Проверка инсталлеров === -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("installerCheckBtn");
@@ -190,13 +162,15 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
-<!-- === AUTO FLOW === -->
+<!-- === ЛОГИКА FLOW === -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const startBtn = document.getElementById("startFlowBtn");
-  const enter = document.getElementById("enterBtn");
   const text = document.getElementById("text");
   const reason = document.getElementById("reason");
+  const enter = document.getElementById("enterBtn");
+
+  enter.style.display = "none";
 
   startBtn.addEventListener("click", async () => {
     startBtn.disabled = true;
@@ -209,7 +183,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const canLaunch = res?.decision?.canLaunch === true;
       const failReason =
-        res?.risk?.reasons?.[0]?.text ||
+        res?.risk?.reasons?.[0] ||
         res?.decision?.reason ||
         "Сервер отклонил доступ.";
 
@@ -234,7 +208,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 </script>
 
-<!-- === FEATURE GATE === -->
+<!-- === FeatureGate === -->
 <script>
 (function() {
   async function testVT18() {
@@ -252,6 +226,7 @@ document.addEventListener("DOMContentLoaded", () => {
         el.remove();
       }
     } catch {}
+
     return { pass: !!(hasAPI && cssOK && ran && finished) };
   }
 
@@ -278,20 +253,23 @@ document.addEventListener("DOMContentLoaded", () => {
 })();
 </script>
 
-<!-- === FINGERPRINT === -->
+<!-- === Fingerprint Loader === -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const API = window.__API_BASE;
+
   async function loadFP() {
     try {
       const resp = await fetch(API + "/api/gate", { method: "POST" });
       const j = await resp.json().catch(() => null);
       if (!j || !j.fingerprint?.short) return;
+
       const e = document.getElementById("fpId");
       e.querySelector("code").textContent = j.fingerprint.short;
       e.style.display = "block";
     } catch {}
   }
+
   setTimeout(loadFP, 150);
 });
 </script>
