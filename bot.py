@@ -70,6 +70,7 @@ class Config:
     mode: str         # polling | webhook (polling по умолчанию)
     public_base: str  # напр. https://cklick1link.com
     port: int         # порт для HTTP API
+    http_enabled: bool
     db_path: str      # путь к SQLite
     admin_api_secret: str
 
@@ -85,6 +86,7 @@ def load_cfg() -> Config:
     mode = (os.getenv("BOT_MODE", "polling") or "polling").strip().lower()
     public_base = (os.getenv("PUBLIC_BASE") or os.getenv("RENDER_EXTERNAL_URL") or "").strip()
     port = _env_int("PORT", 10000)
+    http_enabled = (os.getenv("BOT_HTTP_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"})
     db_path = (os.getenv("USERS_DB_PATH") or "data/clients.db").strip()
     admin_api_secret = (os.getenv("ADMIN_API_SECRET") or "").strip()
     if not admin_api_secret:
@@ -96,6 +98,7 @@ def load_cfg() -> Config:
         mode=mode,
         public_base=public_base,
         port=port,
+        http_enabled=http_enabled,
         db_path=db_path,
         admin_api_secret=admin_api_secret,
     )
@@ -356,11 +359,16 @@ def make_telegram_app() -> Application:
     return app
 
 def main():
-    # HTTP API
-    start_http_server_in_thread()
+    # HTTP API (в этом проекте обычно не нужен: основной API обслуживает Node server/index.js)
+    if CFG.http_enabled:
+        start_http_server_in_thread()
+    else:
+        log.info("[http] disabled (set BOT_HTTP_ENABLED=1 to enable)")
 
     # Telegram
     tg = make_telegram_app()
+    # Python 3.14: создаём loop явно перед run_polling()/run_webhook()
+    asyncio.set_event_loop(asyncio.new_event_loop())
     if CFG.mode == "webhook":
         # Webhook-режим (если захочешь) — адресом будет PUBLIC_BASE + секретный путь
         if not CFG.public_base:
