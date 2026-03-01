@@ -130,7 +130,7 @@ button:disabled{
 
 #note {
   font-size:12px;
-  color:#666;
+  color:#6f34f7;
   margin-top:10px;
   min-height:16px;
 }
@@ -302,10 +302,10 @@ claimCodeBtn.onclick = async () => {
 };
 
 window.addEventListener("DOMContentLoaded", () => {
+  accessCodeInput.value = "";
   if (typeof window.getCurrentAccessCode === "function") {
     const code = window.getCurrentAccessCode();
     if (code) {
-      accessCodeInput.value = code;
       try {
         const exp = Number(localStorage.getItem("ios_access_expires_at") || 0);
         if (exp > Date.now()) setAccessReady(code, exp);
