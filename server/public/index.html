@@ -72,6 +72,30 @@ button:hover:not(:disabled){
 
 #enterBtn { display:none; }
 #reason { font-size:13px;margin-top:4px; }
+.access-row {
+  display:flex;
+  gap:8px;
+  margin-top:10px;
+}
+.access-row input {
+  flex:1;
+  min-width:0;
+  border:1px solid rgba(0,0,0,.2);
+  border-radius:10px;
+  padding:12px 10px;
+  font-size:15px;
+  text-transform:uppercase;
+}
+.access-row button {
+  width:auto;
+  margin-top:0;
+  padding:12px 14px;
+}
+#accessStatus {
+  font-size:12px;
+  color:#111;
+  margin-top:6px;
+}
 </style>
 </head>
 
@@ -86,9 +110,14 @@ button:hover:not(:disabled){
   <h2 id="title">Проверка устройства</h2>
   <p id="text">Ожидание…</p>
   <div id="reason"></div>
+  <div class="access-row">
+    <input id="accessCodeInput" placeholder="Введите код доступа" autocomplete="off" />
+    <button id="claimCodeBtn">Активировать</button>
+  </div>
+  <div id="accessStatus">Сначала активируйте код доступа.</div>
 
   <button id="installerCheckBtn">Проверить инсталлеры</button>
-  <button id="startFlowBtn">Начать проверку</button>
+  <button id="startFlowBtn" disabled>Начать проверку</button>
   <button id="enterBtn">Войти 18+</button>
 
   <p id="note" style="font-size:12px;color:#111;"></p>
@@ -110,6 +139,48 @@ document.getElementById("installerCheckBtn").onclick = async () => {
     await new Promise(r => setTimeout(r, 350));
   }
 };
+
+function setAccessReady(code, expiresAt) {
+  const start = document.getElementById("startFlowBtn");
+  const input = document.getElementById("accessCodeInput");
+  const status = document.getElementById("accessStatus");
+  const sec = Math.max(0, Math.floor((Number(expiresAt || 0) - Date.now()) / 1000));
+  const min = Math.floor(sec / 60);
+  const rem = sec % 60;
+  start.disabled = false;
+  input.value = code || input.value;
+  status.textContent = `Код активен. Доступ для этого устройства: ${min}:${String(rem).padStart(2, "0")}.`;
+}
+
+document.getElementById("claimCodeBtn").onclick = async () => {
+  const input = document.getElementById("accessCodeInput");
+  const status = document.getElementById("accessStatus");
+  const code = (input.value || "").trim().toUpperCase();
+  if (!code) {
+    status.textContent = "Введите код доступа.";
+    return;
+  }
+  if (typeof window.claimAccessCode !== "function") {
+    status.textContent = "Сервис ещё загружается. Повторите через секунду.";
+    return;
+  }
+  status.textContent = "Проверяем код…";
+  try {
+    const r = await window.claimAccessCode(code);
+    setAccessReady(code, r?.accessExpiresAt);
+  } catch (e) {
+    status.textContent = e?.message || "Код недействителен.";
+  }
+};
+
+window.addEventListener("DOMContentLoaded", () => {
+  if (typeof window.getCurrentAccessCode === "function") {
+    const code = window.getCurrentAccessCode();
+    if (code) {
+      document.getElementById("accessCodeInput").value = code;
+    }
+  }
+});
 
 // ===== ОСНОВНАЯ КНОПКА =====
 document.getElementById("startFlowBtn").onclick = async () => {

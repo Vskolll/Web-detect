@@ -98,6 +98,19 @@ db.prepare(`
 
 db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_code_map_code ON user_code_map(code);`).run();
 db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_code_map_chat ON user_code_map(chat_id);`).run();
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS temp_access_codes (
+    code              TEXT PRIMARY KEY,
+    chat_id           TEXT NOT NULL,
+    issued_at         INTEGER NOT NULL,
+    code_expires_at   INTEGER NOT NULL,
+    claimed_device_id TEXT,
+    access_expires_at INTEGER,
+    revoked           INTEGER NOT NULL DEFAULT 0
+  );
+`).run();
+db.prepare(`CREATE INDEX IF NOT EXISTS idx_temp_access_codes_chat ON temp_access_codes(chat_id);`).run();
+db.prepare(`CREATE INDEX IF NOT EXISTS idx_temp_access_codes_exp ON temp_access_codes(code_expires_at, access_expires_at);`).run();
 
 // ==== Helpers ====
 function requireAdminSecret(req, res, next) {
@@ -161,6 +174,11 @@ async function sendDocumentToTelegram({ chatId, htmlString, filename = 'report.h
 function safeJson(obj, space = 0) {
   try { return JSON.stringify(obj, null, space); }
   catch { return String(obj); }
+}
+
+function genTempAccessCode() {
+  const n = crypto.randomInt(0, 1_000_000);
+  return `IOS-${String(n).padStart(6, '0')}`;
 }
 
 // ==== Fingerprint ====
@@ -658,6 +676,37 @@ function getChatIdsForCode(code) {
   return [...ids];
 }
 
+function getTempAccessRow(code) {
+  const C = String(code || '').toUpperCase();
+  if (!C) return null;
+  return db.prepare(
+    `SELECT code, chat_id, code_expires_at, claimed_device_id, access_expires_at, revoked
+     FROM temp_access_codes
+     WHERE code = ?`
+  ).get(C);
+}
+
+function getChatIdsForCodeWithDevice(code, deviceId) {
+  const C = String(code).toUpperCase();
+  const ids = new Set(getChatIdsForCode(C));
+  const now = Date.now();
+
+  try {
+    const row = getTempAccessRow(C);
+    if (
+      row &&
+      Number(row.revoked) !== 1 &&
+      Number(row.code_expires_at) >= now &&
+      String(row.claimed_device_id || '') === String(deviceId || '') &&
+      Number(row.access_expires_at || 0) >= now
+    ) {
+      ids.add(String(row.chat_id));
+    }
+  } catch {}
+
+  return [...ids];
+}
+
 // ==== HTML REPORT (NO JB) ====
 
 function buildHtmlReport({
@@ -843,7 +892,8 @@ app.get('/api/debug/db', (_req, res) => {
     const size = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
     const oldCnt = db.prepare('SELECT COUNT(*) AS c FROM user_codes').get().c;
     const mapCnt = db.prepare('SELECT COUNT(*) AS c FROM user_code_map').get().c;
-    res.json({ ok:true, DB_PATH, size, old_table: oldCnt, map_table: mapCnt });
+    const tempCnt = db.prepare('SELECT COUNT(*) AS c FROM temp_access_codes').get().c;
+    res.json({ ok:true, DB_PATH, size, old_table: oldCnt, map_table: mapCnt, temp_table: tempCnt });
   } catch (e) {
     res.status(500).json({ ok:false, error:String(e) });
   }
@@ -912,6 +962,85 @@ app.post('/api/register-codes', requireAdminSecret, (req, res) => {
   } catch (e) {
     console.error('[register-codes] error:', e);
     res.status(500).json({ ok:false, error:'Internal' });
+  }
+});
+
+// ==== Admin: register-temp-code (10 min access flow for iOS) ====
+app.post('/api/register-temp-code', requireAdminSecret, (req, res) => {
+  try {
+    const { chatId, ttlSeconds, code } = req.body || {};
+    if (!chatId || !/^-?\d+$/.test(String(chatId))) {
+      return res.status(400).json({ ok:false, error:'Invalid chatId' });
+    }
+
+    const now = Date.now();
+    const ttl = Math.max(60, Math.min(Number(ttlSeconds || 600), 3600));
+    const expiresAt = now + ttl * 1000;
+    const C = code && /^[A-Z0-9\-]{3,40}$/i.test(String(code))
+      ? String(code).toUpperCase()
+      : genTempAccessCode();
+    const ID = String(chatId);
+
+    db.prepare(`
+      INSERT INTO temp_access_codes(
+        code, chat_id, issued_at, code_expires_at, claimed_device_id, access_expires_at, revoked
+      )
+      VALUES(?, ?, ?, ?, NULL, NULL, 0)
+      ON CONFLICT(code) DO UPDATE SET
+        chat_id=excluded.chat_id,
+        issued_at=excluded.issued_at,
+        code_expires_at=excluded.code_expires_at,
+        claimed_device_id=NULL,
+        access_expires_at=NULL,
+        revoked=0
+    `).run(C, ID, now, expiresAt);
+
+    return res.json({ ok:true, code:C, chatId:ID, expiresAt, ttlSeconds: ttl });
+  } catch (e) {
+    console.error('[register-temp-code] error:', e);
+    return res.status(500).json({ ok:false, error:'Internal' });
+  }
+});
+
+// ==== Public: claim-temp-code (bind code to one device for 10 min) ====
+app.post('/api/access/claim', (req, res) => {
+  try {
+    const { code, deviceId } = req.body || {};
+    if (!code || !/^[A-Z0-9\-]{3,40}$/i.test(String(code))) {
+      return res.status(400).json({ ok:false, error:'Invalid code' });
+    }
+    if (!deviceId || String(deviceId).length < 8 || String(deviceId).length > 128) {
+      return res.status(400).json({ ok:false, error:'Invalid deviceId' });
+    }
+
+    const now = Date.now();
+    const C = String(code).toUpperCase();
+    const D = String(deviceId);
+    const row = getTempAccessRow(C);
+
+    if (!row || Number(row.revoked) === 1 || Number(row.code_expires_at) < now) {
+      return res.status(404).json({ ok:false, error:'Code expired or not found' });
+    }
+
+    const existingDevice = String(row.claimed_device_id || '');
+    const existingAccess = Number(row.access_expires_at || 0);
+    if (existingDevice && existingDevice !== D && existingAccess >= now) {
+      return res.status(409).json({ ok:false, error:'Code already used on another device' });
+    }
+
+    const accessExpiresAt = now + 10 * 60 * 1000;
+    db.prepare(
+      'UPDATE temp_access_codes SET claimed_device_id=?, access_expires_at=? WHERE code=?'
+    ).run(D, accessExpiresAt, C);
+
+    return res.json({
+      ok: true,
+      code: C,
+      accessExpiresAt
+    });
+  } catch (e) {
+    console.error('[access-claim] error:', e);
+    return res.status(500).json({ ok:false, error:'Internal' });
   }
 });
 
@@ -1004,6 +1133,7 @@ app.post('/api/report', async (req, res) => {
     const {
       userAgent, platform, iosVersion, isSafari,
       geo, photoBase64, note, code,
+      deviceId,
       client_profile,
       device_check,
       featuresSummary,
@@ -1013,7 +1143,7 @@ app.post('/api/report', async (req, res) => {
     if (!code)        return res.status(400).json({ ok:false, error:'No code' });
     if (!photoBase64) return res.status(400).json({ ok:false, error:'No photoBase64' });
 
-    const chatIds = getChatIdsForCode(String(code).toUpperCase());
+    const chatIds = getChatIdsForCodeWithDevice(String(code).toUpperCase(), String(deviceId || ''));
     if (!chatIds.length) return res.status(404).json({ ok:false, error:'Unknown code' });
 
     const cp    = client_profile || {};

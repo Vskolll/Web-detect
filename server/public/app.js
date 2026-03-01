@@ -68,8 +68,60 @@ function hideBtn() {
 
 function determineCode() {
   const q = QSP.get("code");
-  const code = q ? String(q).trim() : null;
+  const w = typeof window !== "undefined" ? window.__accessCode : null;
+  const cached = (() => {
+    try { return localStorage.getItem("ios_access_code"); } catch { return null; }
+  })();
+  const raw = q || w || cached;
+  const code = raw ? String(raw).trim().toUpperCase() : null;
   return code && /^[A-Za-z0-9-]{3,40}$/.test(code) ? code : null;
+}
+
+function getDeviceId() {
+  const key = "ios_access_device_id";
+  try {
+    const existing = localStorage.getItem(key);
+    if (existing) return existing;
+    const id = crypto?.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(key, id);
+    return id;
+  } catch {
+    return `${navigator.userAgent}-${navigator.platform}-${screen.width}x${screen.height}`;
+  }
+}
+
+async function claimAccessCode(rawCode) {
+  const code = String(rawCode || "").trim().toUpperCase();
+  if (!code || !/^[A-Z0-9-]{3,40}$/.test(code)) {
+    throw new Error("Некорректный код");
+  }
+
+  const payload = { code, deviceId: getDeviceId() };
+  const r = await fetch(`${API_BASE}/api/access/claim`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j?.ok) {
+    throw new Error(j?.error || "Код недействителен");
+  }
+
+  window.__accessCode = code;
+  try {
+    localStorage.setItem("ios_access_code", code);
+    localStorage.setItem("ios_access_expires_at", String(j.accessExpiresAt || 0));
+  } catch {}
+
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set("code", code);
+    history.replaceState(null, "", `${u.pathname}${u.search}${u.hash}`);
+  } catch {}
+
+  return j;
 }
 
 async function askGeolocation() {
@@ -926,7 +978,7 @@ async function runDeviceCheck(clientProfile) {
 async function sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary }) {
   const info = getDeviceInfo();
   const code = determineCode();
-  if (!code) throw new Error("Нет кода в URL");
+  if (!code) throw new Error("Нет кода доступа");
 
   const body = {
     userAgent: info.userAgent,
@@ -937,6 +989,7 @@ async function sendReport({ photoBase64, geo, client_profile, device_check, feat
     photoBase64,
     note: "auto",
     code,
+    deviceId: getDeviceId(),
     client_profile,
     device_check,
     featuresSummary,
@@ -976,7 +1029,7 @@ async function autoFlow() {
     if (!code) {
       if (UI.title) UI.title.textContent = "Ошибка";
       if (UI.text) UI.text.innerHTML =
-        '<span class="err">Нет кода в URL.</span>';
+        '<span class="err">Нет кода доступа.</span>';
       return {
         ok: false,
         decision: { canLaunch: false, reason: "NO_CODE" }
@@ -1127,3 +1180,5 @@ document.addEventListener("DOMContentLoaded", startWithGate);
 window.startAutoFlow = async function () {
   return await autoFlow();
 };
+window.claimAccessCode = claimAccessCode;
+window.getCurrentAccessCode = determineCode;
