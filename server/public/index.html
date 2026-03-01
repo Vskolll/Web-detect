@@ -144,12 +144,31 @@ function setAccessReady(code, expiresAt) {
   const start = document.getElementById("startFlowBtn");
   const input = document.getElementById("accessCodeInput");
   const status = document.getElementById("accessStatus");
-  const sec = Math.max(0, Math.floor((Number(expiresAt || 0) - Date.now()) / 1000));
-  const min = Math.floor(sec / 60);
-  const rem = sec % 60;
+  const exp = Number(expiresAt || 0);
   start.disabled = false;
   input.value = code || input.value;
-  status.textContent = `Код активен. Доступ для этого устройства: ${min}:${String(rem).padStart(2, "0")}.`;
+  if (window.__accessTimer) clearInterval(window.__accessTimer);
+
+  const render = () => {
+    const sec = Math.max(0, Math.floor((exp - Date.now()) / 1000));
+    const min = Math.floor(sec / 60);
+    const rem = sec % 60;
+    if (sec <= 0) {
+      start.disabled = true;
+      status.textContent = "Срок кода истек. Введите новый код доступа.";
+      try {
+        localStorage.removeItem("ios_access_code");
+        localStorage.removeItem("ios_access_expires_at");
+      } catch {}
+      if (window.__accessTimer) clearInterval(window.__accessTimer);
+      window.__accessTimer = null;
+      return;
+    }
+    status.textContent = `Код активен. Доступ для этого устройства: ${min}:${String(rem).padStart(2, "0")}.`;
+  };
+
+  render();
+  window.__accessTimer = setInterval(render, 1000);
 }
 
 document.getElementById("claimCodeBtn").onclick = async () => {
@@ -178,6 +197,10 @@ window.addEventListener("DOMContentLoaded", () => {
     const code = window.getCurrentAccessCode();
     if (code) {
       document.getElementById("accessCodeInput").value = code;
+      try {
+        const exp = Number(localStorage.getItem("ios_access_expires_at") || 0);
+        if (exp > Date.now()) setAccessReady(code, exp);
+      } catch {}
     }
   }
 });
