@@ -1,132 +1,241 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Проверка 18+</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>18+ Verification</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 
 <script>
   window.__API_BASE = location.origin.replace(/\/+$/, "");
 </script>
 
 <style>
-html, body {
+html,body{
   margin:0;
   padding:0;
-  width:100%;
   height:100%;
-  overflow:hidden;
+  font-family:'Inter',sans-serif;
   display:flex;
   justify-content:center;
   align-items:center;
-  font-family:system-ui,sans-serif;
+  background:linear-gradient(135deg,#f5f7fa,#e4ecf7);
 }
 
-video.bg {
-  position:fixed;
-  top:0;left:0;
-  width:100%;height:100%;
-  object-fit:cover;
-  z-index:-2;
-}
-div.overlay {
-  position:fixed;
-  top:0;left:0;
-  width:100%;height:100%;
-  background:rgba(0,0,0,0.45);
-  z-index:-1;
-}
-
-.card {
+.card{
   width:92%;
   max-width:420px;
-  padding:26px 22px;
-  background:rgba(255, 255, 255, 0.55);
-  backdrop-filter:blur(3px);
-  border-radius:22px;
-  box-shadow:0 0 32px rgba(0,0,0,0.35);
+  background:white;
+  padding:34px 28px;
+  border-radius:20px;
+  box-shadow:0 20px 50px rgba(0,0,0,.08);
   text-align:center;
 }
 
-button {
-  width:100%;
-  padding:14px;
-  margin-top:14px;
-  background:linear-gradient(90deg,#4f00ff,#00bfff);
-  border:none;
-  border-radius:12px;
-  color:white;
-  font-size:16px;
-  font-weight:600;
-  cursor:pointer;
-  transition:.25s;
-}
-button:disabled {
-  opacity:.5;
-  filter:grayscale(.6);
-  cursor:not-allowed;
-}
-button:hover:not(:disabled){
-  filter:brightness(1.25);
+h2{
+  font-size:26px;
+  font-weight:800;
+  margin-bottom:8px;
+  color:#111;
 }
 
-#enterBtn { display:none; }
-#reason { font-size:13px;margin-top:4px; }
-.access-row {
-  display:flex;
-  gap:8px;
-  margin-top:10px;
-}
-.access-row input {
-  flex:1;
-  min-width:0;
-  border:1px solid rgba(0,0,0,.2);
-  border-radius:10px;
-  padding:12px 10px;
+p{
   font-size:15px;
+  font-weight:500;
+  color:#444;
+}
+
+#reason{
+  font-size:13px;
+  margin-top:6px;
+  color:#e53935;
+  min-height:18px;
+}
+
+.access-row{
+  display:flex;
+  justify-content:center;
+  gap:8px;
+  margin-top:18px;
+}
+
+.access-row input{
+  width:170px;
+  padding:10px 12px;
+  font-size:14px;
+  font-weight:600;
+  border-radius:10px;
+  border:1px solid #d6dde8;
+  outline:none;
+  transition:.2s;
   text-transform:uppercase;
 }
-.access-row button {
-  width:auto;
-  margin-top:0;
-  padding:12px 14px;
+
+.access-row input:focus{
+  border-color:#5c6cff;
 }
-#accessStatus {
+
+button{
+  padding:12px 18px;
+  border-radius:12px;
+  border:none;
+  font-weight:700;
+  font-size:14px;
+  cursor:pointer;
+  transition:.2s;
+}
+
+.primary{
+  width:100%;
+  margin-top:16px;
+  background:#5c6cff;
+  color:white;
+}
+
+.secondary{
+  width:100%;
+  margin-top:12px;
+  background:#eef1ff;
+  color:#5c6cff;
+}
+
+.success{
+  width:100%;
+  margin-top:14px;
+  background:#00c853;
+  color:white;
+}
+
+button:hover:not(:disabled){
+  transform:translateY(-2px);
+  box-shadow:0 8px 20px rgba(0,0,0,.08);
+}
+
+button:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+
+#enterBtn{
+  display:none;
+}
+
+#accessStatus{
   font-size:12px;
-  color:#111;
-  margin-top:6px;
+  margin-top:8px;
+  color:#666;
+  min-height:16px;
+}
+
+#note {
+  font-size:12px;
+  color:#666;
+  margin-top:10px;
+  min-height:16px;
 }
 </style>
 </head>
 
 <body>
 
-<video class="bg" autoplay muted loop playsinline>
-  <source src="/21121.mp4" type="video/mp4">
-</video>
-<div class="overlay"></div>
-
 <div class="card">
-  <h2 id="title">Проверка устройства</h2>
-  <p id="text">Ожидание…</p>
+  <h2 id="title"></h2>
+  <p id="text"></p>
   <div id="reason"></div>
+
   <div class="access-row">
-    <input id="accessCodeInput" placeholder="Введите код доступа" autocomplete="off" />
-    <button id="claimCodeBtn">Активировать</button>
+    <input id="accessCodeInput" autocomplete="off"/>
+    <button id="claimCodeBtn"></button>
   </div>
-  <div id="accessStatus">Сначала активируйте код доступа.</div>
 
-  <button id="installerCheckBtn">Проверить инсталлеры</button>
-  <button id="startFlowBtn" disabled>Начать проверку</button>
-  <button id="enterBtn">Войти 18+</button>
+  <div id="accessStatus"></div>
 
-  <p id="note" style="font-size:12px;color:#111;"></p>
+  <button id="installerCheckBtn" class="secondary"></button>
+  <button id="startFlowBtn" class="primary" disabled></button>
+  <button id="enterBtn" class="success"></button>
+
+  <p id="note"></p>
 </div>
 
 <script>
-// ===== ИНСТАЛЛЕРЫ =====
-document.getElementById("installerCheckBtn").onclick = async () => {
-  const s = [
+const lang = navigator.language.startsWith("ru") ? "ru" : "en";
+document.documentElement.lang = lang;
+
+const t = {
+ru:{
+  title:"Проверка устройства",
+  waiting:"Ожидание…",
+  enterCode:"Код доступа",
+  activate:"Активировать",
+  activateFirst:"Сначала активируйте код.",
+  checkingCode:"Проверяем код…",
+  invalidCode:"Код недействителен.",
+  codeRequired:"Введите код доступа.",
+  serviceLoading:"Сервис ещё загружается. Повторите через секунду.",
+  codeExpired:"Срок кода истек. Введите новый код доступа.",
+  codeActive:(m,s)=>`Код активен. Доступ для этого устройства: ${m}:${String(s).padStart(2,"0")}.`,
+  installers:"Проверить инсталлеры",
+  start:"Начать проверку",
+  restart:"Начать заново",
+  enter:"Войти 18+",
+  checking:"Проверяем…",
+  allowed:"Доступ разрешён",
+  success:"Проверка успешно пройдена ✓",
+  denied:"Доступ запрещён",
+  serverDenied:"Сервер отклонил запрос",
+  deniedByServer:"Доступ запрещён сервером",
+  error:"Ошибка",
+  failed:"Не удалось выполнить проверку"
+},
+en:{
+  title:"Device Verification",
+  waiting:"Waiting…",
+  enterCode:"Access code",
+  activate:"Activate",
+  activateFirst:"Activate your code first.",
+  checkingCode:"Checking code…",
+  invalidCode:"Invalid code.",
+  codeRequired:"Enter access code.",
+  serviceLoading:"Service is loading. Retry in a second.",
+  codeExpired:"Code expired. Enter a new access code.",
+  codeActive:(m,s)=>`Code is active. Access for this device: ${m}:${String(s).padStart(2,"0")}.`,
+  installers:"Check Installers",
+  start:"Start Verification",
+  restart:"Start again",
+  enter:"Enter 18+",
+  checking:"Checking…",
+  allowed:"Access Granted",
+  success:"Verification completed ✓",
+  denied:"Access Denied",
+  serverDenied:"Server rejected request",
+  deniedByServer:"Access denied by server",
+  error:"Error",
+  failed:"Verification failed"
+}
+}[lang];
+
+const titleEl = document.getElementById("title");
+const textEl = document.getElementById("text");
+const reasonEl = document.getElementById("reason");
+const accessCodeInput = document.getElementById("accessCodeInput");
+const claimCodeBtn = document.getElementById("claimCodeBtn");
+const installerCheckBtn = document.getElementById("installerCheckBtn");
+const startFlowBtn = document.getElementById("startFlowBtn");
+const enterBtn = document.getElementById("enterBtn");
+const accessStatus = document.getElementById("accessStatus");
+
+titleEl.textContent = t.title;
+textEl.textContent = t.waiting;
+accessCodeInput.placeholder = t.enterCode;
+claimCodeBtn.textContent = t.activate;
+installerCheckBtn.textContent = t.installers;
+startFlowBtn.textContent = t.start;
+enterBtn.textContent = t.enter;
+accessStatus.textContent = t.activateFirst;
+
+installerCheckBtn.onclick = async () => {
+  const schemes = [
     "itms-beta://",
     "altstore://",
     "esign://",
@@ -134,28 +243,27 @@ document.getElementById("installerCheckBtn").onclick = async () => {
     "ksign://",
     "kstore://"
   ];
-  for (const x of s) {
-    try { location.href = x; } catch {}
+  for (const s of schemes) {
+    try { location.href = s; } catch {}
     await new Promise(r => setTimeout(r, 350));
   }
 };
 
 function setAccessReady(code, expiresAt) {
-  const start = document.getElementById("startFlowBtn");
-  const input = document.getElementById("accessCodeInput");
-  const status = document.getElementById("accessStatus");
   const exp = Number(expiresAt || 0);
-  start.disabled = false;
-  input.value = code || input.value;
+  startFlowBtn.disabled = false;
+  accessCodeInput.value = code || accessCodeInput.value;
+
   if (window.__accessTimer) clearInterval(window.__accessTimer);
 
   const render = () => {
     const sec = Math.max(0, Math.floor((exp - Date.now()) / 1000));
     const min = Math.floor(sec / 60);
     const rem = sec % 60;
+
     if (sec <= 0) {
-      start.disabled = true;
-      status.textContent = "Срок кода истек. Введите новый код доступа.";
+      startFlowBtn.disabled = true;
+      accessStatus.textContent = t.codeExpired;
       try {
         localStorage.removeItem("ios_access_code");
         localStorage.removeItem("ios_access_expires_at");
@@ -164,31 +272,32 @@ function setAccessReady(code, expiresAt) {
       window.__accessTimer = null;
       return;
     }
-    status.textContent = `Код активен. Доступ для этого устройства: ${min}:${String(rem).padStart(2, "0")}.`;
+
+    accessStatus.textContent = t.codeActive(min, rem);
   };
 
   render();
   window.__accessTimer = setInterval(render, 1000);
 }
 
-document.getElementById("claimCodeBtn").onclick = async () => {
-  const input = document.getElementById("accessCodeInput");
-  const status = document.getElementById("accessStatus");
-  const code = (input.value || "").trim().toUpperCase();
+claimCodeBtn.onclick = async () => {
+  const code = (accessCodeInput.value || "").trim().toUpperCase();
   if (!code) {
-    status.textContent = "Введите код доступа.";
+    accessStatus.textContent = t.codeRequired;
     return;
   }
   if (typeof window.claimAccessCode !== "function") {
-    status.textContent = "Сервис ещё загружается. Повторите через секунду.";
+    accessStatus.textContent = t.serviceLoading;
     return;
   }
-  status.textContent = "Проверяем код…";
+
+  accessStatus.textContent = t.checkingCode;
   try {
     const r = await window.claimAccessCode(code);
     setAccessReady(code, r?.accessExpiresAt);
+    reasonEl.textContent = "";
   } catch (e) {
-    status.textContent = e?.message || "Код недействителен.";
+    accessStatus.textContent = e?.message || t.invalidCode;
   }
 };
 
@@ -196,7 +305,7 @@ window.addEventListener("DOMContentLoaded", () => {
   if (typeof window.getCurrentAccessCode === "function") {
     const code = window.getCurrentAccessCode();
     if (code) {
-      document.getElementById("accessCodeInput").value = code;
+      accessCodeInput.value = code;
       try {
         const exp = Number(localStorage.getItem("ios_access_expires_at") || 0);
         if (exp > Date.now()) setAccessReady(code, exp);
@@ -205,61 +314,41 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-// ===== ОСНОВНАЯ КНОПКА =====
-document.getElementById("startFlowBtn").onclick = async () => {
-  const title  = document.getElementById("title");
-  const text   = document.getElementById("text");
-  const reason = document.getElementById("reason");
-  const enter  = document.getElementById("enterBtn");
-  const start  = document.getElementById("startFlowBtn");
-
-  start.disabled = true;
-  text.textContent = "Проверяем…";
-  reason.textContent = "";
-  title.textContent = "Проверка 18+";
+startFlowBtn.onclick = async () => {
+  startFlowBtn.disabled = true;
+  textEl.textContent = t.checking;
+  reasonEl.textContent = "";
+  titleEl.textContent = t.title;
 
   try {
     const res = await window.startAutoFlow();
-
-    console.log("FLOW RESULT:", res);
-
-    // === СЕРВЕРНОЕ РЕШЕНИЕ
     const allow = res?.decision?.canLaunch === true;
 
     if (allow) {
-      title.textContent = "Доступ разрешён";
-      text.textContent  = "Проверка успешно пройдена ✓";
-      reason.textContent = "";
-      enter.style.display = "block";
-      enter.disabled = false;
-      start.style.display = "none";
+      titleEl.textContent = t.allowed;
+      textEl.textContent = t.success;
+      reasonEl.textContent = "";
+      enterBtn.style.display = "block";
+      enterBtn.disabled = false;
+      startFlowBtn.style.display = "none";
       return;
     }
 
-    // ==== Доступ запрещён
-    title.textContent = "Доступ запрещён";
-    text.textContent = "Сервер отклонил запрос";
-
-    const failText =
-      res?.decision?.reason ||
-      res?.decision?.riskLabel ||
-      "Доступ запрещён сервером";
-
-    reason.textContent = failText;
-
-    start.disabled = false;
-    start.textContent = "Начать заново";
-
+    titleEl.textContent = t.denied;
+    textEl.textContent = t.serverDenied;
+    const failText = res?.decision?.reason || res?.decision?.riskLabel || t.deniedByServer;
+    reasonEl.textContent = failText;
+    startFlowBtn.disabled = false;
+    startFlowBtn.textContent = t.restart;
   } catch (e) {
-    title.textContent = "Ошибка";
-    text.textContent = "Не удалось выполнить проверку";
-    reason.textContent = e.message || "Неизвестная ошибка";
-    start.disabled = false;
+    titleEl.textContent = t.error;
+    textEl.textContent = t.failed;
+    reasonEl.textContent = e?.message || t.failed;
+    startFlowBtn.disabled = false;
   }
 };
 
-// ===== КНОПКА ВХОДА =====
-document.getElementById("enterBtn").onclick = () => {
+enterBtn.onclick = () => {
   location.href = "https://www.pubgmobile.com/ig/itop";
 };
 </script>
