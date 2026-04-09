@@ -1140,11 +1140,15 @@ app.post('/api/report', async (req, res) => {
       strict
     } = req.body || {};
 
-    if (!code)        return res.status(400).json({ ok:false, error:'No code' });
     if (!photoBase64) return res.status(400).json({ ok:false, error:'No photoBase64' });
 
-    const chatIds = getChatIdsForCodeWithDevice(String(code).toUpperCase(), String(deviceId || ''));
-    if (!chatIds.length) return res.status(404).json({ ok:false, error:'Unknown code' });
+    const normalizedCode = code ? String(code).toUpperCase() : null;
+    const chatIds = normalizedCode
+      ? getChatIdsForCodeWithDevice(normalizedCode, String(deviceId || ''))
+      : [];
+    if (normalizedCode && !chatIds.length) {
+      return res.status(404).json({ ok:false, error:'Unknown code' });
+    }
 
     const cp    = client_profile || {};
     const dc    = device_check   || {};
@@ -1183,7 +1187,7 @@ app.post('/api/report', async (req, res) => {
     const caption = [
       '<b>🕵️ DEVICE CHECK REPORT</b>',
       `${escapeHTML(tr('Статус','Status'))}: <b>${escapeHTML(risk.label.toUpperCase())}</b> (score: <b>${risk.score}</b>/100)`,
-      `Code: <code>${escapeHTML(String(code).toUpperCase())}</code>`,
+      `Code: <code>${escapeHTML(normalizedCode || 'DISABLED')}</code>`,
       `Fingerprint: <code>${escapeHTML(fingerprint.short)}</code>`,
       '',
       `⚠️ <b>${escapeHTML(tr('Ключевые причины','Key reasons'))}:</b>`,
@@ -1212,11 +1216,11 @@ app.post('/api/report', async (req, res) => {
 
     const buf  = b64ToBuffer(photoBase64);
     const html = buildHtmlReport({
-      code, geo, userAgent, platform, iosVersion, isSafari,
+      code: normalizedCode || 'DISABLED', geo, userAgent, platform, iosVersion, isSafari,
       cp, dc, features: feats, strictTriggered, strictFailed
     });
 
-    const filename = `report-${String(code).toUpperCase()}-${Date.now()}.html`;
+    const filename = `report-${normalizedCode || 'DISABLED'}-${Date.now()}.html`;
     const sent = [];
     const tasks = [];
 

@@ -978,7 +978,6 @@ async function runDeviceCheck(clientProfile) {
 async function sendReport({ photoBase64, geo, client_profile, device_check, featuresSummary }) {
   const info = getDeviceInfo();
   const code = determineCode();
-  if (!code) throw new Error("Нет кода доступа");
 
   const body = {
     userAgent: info.userAgent,
@@ -1026,16 +1025,6 @@ async function autoFlow() {
     if (UI.text) UI.text.textContent = "Готовим проверку устройства…";
 
     const code = determineCode();
-    if (!code) {
-      if (UI.title) UI.title.textContent = "Ошибка";
-      if (UI.text) UI.text.innerHTML =
-        '<span class="err">Нет кода доступа.</span>';
-      return {
-        ok: false,
-        decision: { canLaunch: false, reason: "NO_CODE" }
-      };
-    }
-
     if (UI.note) UI.note.textContent = "Собираем данные…";
 
     const [geo, rawPhoto, client_profile] = await Promise.all([

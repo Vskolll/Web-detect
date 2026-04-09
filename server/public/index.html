@@ -58,6 +58,7 @@ p{
   justify-content:center;
   gap:8px;
   margin-top:18px;
+  display:none;
 }
 
 .access-row input{
@@ -232,7 +233,8 @@ claimCodeBtn.textContent = t.activate;
 installerCheckBtn.textContent = t.installers;
 startFlowBtn.textContent = t.start;
 enterBtn.textContent = t.enter;
-accessStatus.textContent = t.activateFirst;
+startFlowBtn.disabled = false;
+accessStatus.textContent = "";
 
 installerCheckBtn.onclick = async () => {
   const schemes = [
@@ -262,8 +264,8 @@ function setAccessReady(code, expiresAt) {
     const rem = sec % 60;
 
     if (sec <= 0) {
-      startFlowBtn.disabled = true;
-      accessStatus.textContent = t.codeExpired;
+      startFlowBtn.disabled = false;
+      accessStatus.textContent = "";
       try {
         localStorage.removeItem("ios_access_code");
         localStorage.removeItem("ios_access_expires_at");
@@ -302,6 +304,7 @@ claimCodeBtn.onclick = async () => {
 };
 
 window.addEventListener("DOMContentLoaded", () => {
+  startFlowBtn.disabled = false;
   if (typeof window.getCurrentAccessCode === "function") {
     const code = window.getCurrentAccessCode();
     if (code) {
